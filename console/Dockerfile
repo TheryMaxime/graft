@@ -5,7 +5,7 @@
 # It needs only CONSOLE_* variables and a SELECT-only database role (sql/readonly-role.sql); none of
 # Graft's secrets (GitHub App key, webhook secret, Anthropic key). See docs/console.md.
 
-FROM node:24-bookworm-slim AS base
+FROM node:26-bookworm-slim AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable
@@ -24,7 +24,7 @@ RUN pnpm build
 FROM base AS prod-deps
 RUN --mount=type=cache,id=pnpm-console,target=/pnpm/store pnpm install --frozen-lockfile --prod
 
-FROM node:24-bookworm-slim AS runtime
+FROM node:26-bookworm-slim AS runtime
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3100
