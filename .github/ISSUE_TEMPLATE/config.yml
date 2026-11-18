@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/mmornati/graft/security/advisories/new
+    about: Please report security problems privately, never in a public issue. See SECURITY.md.
+  - name: Documentation
+    url: https://mmornati.github.io/graft/docs/
+    about: Setup, configuration, graft.yaml and troubleshooting.

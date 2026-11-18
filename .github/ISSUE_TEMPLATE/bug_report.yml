@@ -1,0 +1,60 @@
+name: Bug report
+description: Something Graft does wrong.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For a security problem, stop here and report it privately: see SECURITY.md.
+        Please remove tokens, keys, webhook secrets and private code from anything you paste.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The smallest sequence that shows it, with the graft.yaml involved if policy is concerned.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Graft version or commit
+      placeholder: v0.2.3, or a commit SHA
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Provenance
+        - Intent card or risk
+        - Policy (graft.yaml)
+        - Modes, approvals or break-glass
+        - Post-merge guard or revert PRs
+        - MCP server
+        - Model provider
+        - Console
+        - Evaluation or pilot tooling
+        - Deployment or configuration
+        - Documentation or website
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: How Graft is deployed (Docker image, Fly.io, Coolify, source), the model provider, and the modes in effect.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant server or worker log lines, with secrets removed.
+      render: text

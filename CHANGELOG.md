@@ -14,6 +14,7 @@ Graft's releases. Until both the Phase 0 and the Phase 1 gates pass on pilot dat
 
 ### Changed
 
+- Graft is now licensed under the [Apache License, Version 2.0](LICENSE). The repository gains a contributing guide, a code of conduct, issue and pull request templates and Dependabot updates, and each published image carries the license label. The policy lint workflow in the docs no longer asks for a token to read the Graft repository.
 - Risk: the fast model's first pass no longer sets the final class on its own. When the strong writer and the verifier both answered and both rate the change lower, the first pass is shown as `overruled` on the card and does not count. The rule-based floor is unchanged. [Intent cards](docs/features/intent-cards.md)
 - The documentation, the website and the videos catch up with `v0.2.x`: the sample comment in the README and on the website is the current one, the reviewer tour is rebuilt on a new offline run with a new chapter on the verdict, and the explainer no longer says Graft only reports or that only Anthropic receives data. The pilot onboarding guide now speaks of the configured model provider.
 

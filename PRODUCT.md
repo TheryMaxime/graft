@@ -60,10 +60,10 @@ It sits on existing GitHub repositories with nothing to migrate.
 - **Phase 1 built.** Modes and safety rails, approvals Graft can enforce, break-glass with an audit log, the post-merge
   guard with revert pull requests and the MCP server are merged. Nothing enforces until an operator
   raises `GRAFT_MODE_CEILING` (default `report`) and sets a repository to enforce; see `docs/features/modes.md` and
-  `docs/features/guard.md`. Not built: revert PRs, the MCP server, and the security review, pilots and gate.
+  `docs/features/guard.md`.
 - Privacy: no file contents, diffs, PR titles or bodies are stored or logged; rows hold ids, numbers, SHAs, paths and
   the model's own prose. Diffs, PR text and linked issue text *are* sent to Anthropic to write and verify cards.
-- No license has been chosen yet; all rights reserved. The repository is currently private *(per the owner's brief)*.
+- Licensed under the Apache License, Version 2.0. The repository is public.
 
 ## Brand Commitments
 
