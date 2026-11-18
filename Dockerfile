@@ -4,7 +4,7 @@
 # with `node --import ./dist/bin/otel.js dist/bin/worker.js`, migrations with `node dist/bin/migrate.js up` and the operator
 # CLI with `node dist/bin/graft.js <command>`. See docs/deploy/README.md.
 
-FROM node:24-bookworm-slim AS base
+FROM node:26-bookworm-slim AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 # pnpm comes from the `packageManager` field of package.json.
@@ -21,7 +21,7 @@ RUN pnpm build
 FROM base AS prod-deps
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile --prod
 
-FROM node:24-bookworm-slim AS runtime
+FROM node:26-bookworm-slim AS runtime
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3000
