@@ -1,0 +1,8 @@
+Graft
+Copyright 2026 Marco Mornati and the Graft contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The website videos (website/videos/engine/fonts/) ship the Inter, JetBrains Mono and Sora fonts, and
+the console bundles the Courier Prime, IM Fell English and Literata fonts. Each is licensed under the
+SIL Open Font License, Version 1.1.

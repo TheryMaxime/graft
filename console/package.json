@@ -3,6 +3,12 @@
   "version": "0.2.0",
   "private": true,
   "description": "Optional read-only operator console for Graft: a BFF over Graft's Postgres and a small web app.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mmornati/graft.git",
+    "directory": "console"
+  },
   "type": "module",
   "engines": {
     "node": ">=24"

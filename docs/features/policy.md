@@ -45,7 +45,6 @@ jobs:
           repository: mmornati/graft
           ref: <pinned commit SHA>
           path: .graft-tool
-          token: ${{ secrets.GRAFT_TOOL_TOKEN }}  # only while the Graft repo is private
       - uses: pnpm/action-setup@v4
         with: { package_json_file: .graft-tool/package.json }
       - uses: actions/setup-node@v4
@@ -56,7 +55,7 @@ jobs:
 
 It uses `pull_request`, never `pull_request_target`, and the file is only parsed, never executed.
 
-Placeholders in the workflow above: `<pinned commit SHA>` is the Graft commit you lint with (a full SHA, not a branch), and `GRAFT_TOOL_TOKEN` is a secret in **your** repository holding a fine-grained, read-only token for `mmornati/graft`, needed only while the Graft repository is private. The first `actions/checkout@v4` checks out your repository; pin both to commit SHAs as your organisation requires.
+The placeholder in the workflow above: `<pinned commit SHA>` is the Graft commit you lint with (a full SHA, not a branch). The Graft repository is public, so the checkout needs no token. The first `actions/checkout@v4` checks out your repository; pin both to commit SHAs as your organisation requires.
 
 ## Enforce mode
 

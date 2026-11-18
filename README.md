@@ -5,6 +5,7 @@
 **Intent review and policy checks for pull requests written by coding agents.**
 
 [![CI](https://github.com/mmornati/graft/actions/workflows/ci.yml/badge.svg)](https://github.com/mmornati/graft/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 ![Node 24](https://img.shields.io/badge/node-24-339933?logo=nodedotjs&logoColor=white)
 ![TypeScript strict](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
 ![pnpm 11](https://img.shields.io/badge/pnpm-11-F69220?logo=pnpm&logoColor=white)
@@ -302,12 +303,16 @@ pnpm eval:ci                  # synthetic evaluation set against its baseline
 pnpm graft policy schema --check
 ```
 
-CI runs these on every push and pull request, plus `pnpm graft policy check` on the example and starter policies and `pnpm build`. No default test reaches GitHub or the Anthropic API, and none asserts wall-clock time (`pnpm test:perf` opts in).
+More in [CONTRIBUTING.md](CONTRIBUTING.md). CI runs these on every push and pull request, plus `pnpm graft policy check` on the example and starter policies and `pnpm build`. No default test reaches GitHub or the Anthropic API, and none asserts wall-clock time (`pnpm test:perf` opts in).
 
 ## Security
 
 Please report vulnerabilities privately, as described in [SECURITY.md](SECURITY.md). Never commit real credentials: `.env` and key files are git-ignored, and the App key, webhook secret, `ANTHROPIC_API_KEY` and `GRAFT_EVAL_KEY` belong in a secret store.
 
+## Contributing
+
+Issues and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers the setup, the checks to run and how a change is reviewed; everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md).
+
 ## License
 
-No license has been chosen yet; all rights reserved.
+Graft is licensed under the [Apache License, Version 2.0](LICENSE). The fonts shipped with the website videos and the console keep their own license, the SIL Open Font License 1.1.
