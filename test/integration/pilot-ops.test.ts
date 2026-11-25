@@ -14,7 +14,7 @@ import { feedbackSweepJob } from "../../src/modules/intent/index.js";
 import { scheduleIncidentDetection } from "../../src/modules/pilot/incidents.js";
 import { detectIncident, metricsRollupJob, syncReviewers } from "../../src/modules/pilot/index.js";
 import { onChangeSignal, scheduleReviewerSync } from "../../src/modules/pilot/reviewers.js";
-import { OWNED_ROWS, purgeInstallation } from "../../src/pilot/purge.js";
+import { OWNED_ROWS, PRESERVED_ROWS, purgeInstallation } from "../../src/pilot/purge.js";
 import { createPgBossQueue } from "../../src/queue/queue.js";
 import { createTestApp, fakeGitHubFactory, jobContext, type TestApp } from "../helpers/app.js";
 import { FIXED_NOW, testConfig } from "../helpers/config.js";
@@ -375,6 +375,15 @@ async function seedEverything(o: { id: number; repo: number; login: string; seq:
     deleted: true,
   });
   const head = SHA(o.seq * 10 + 1);
+  const team = await t.db
+    .insertInto("billing_teams")
+    .values({ name: `Team ${o.seq}`, created_by: "operator" })
+    .returning("id")
+    .executeTakeFirstOrThrow();
+  await t.db
+    .insertInto("billing_team_repositories")
+    .values({ team_id: team.id, repository_id: o.repo, created_by: "operator" })
+    .execute();
   await t.db
     .insertInto("enabled_repositories")
     .values({
@@ -503,6 +512,9 @@ async function countsFor(id: number, repo: number): Promise<Record<string, numbe
   const runs = sql`(select id from review_time_runs where repository_id = ${repo})`;
   return {
     installations: await n(sql`select count(*) as n from installations where id = ${id}`),
+    billing_team_repositories: await n(
+      sql`select count(*) as n from billing_team_repositories where repository_id = ${repo}`,
+    ),
     enabled_repositories: await n(
       sql`select count(*) as n from enabled_repositories where repository_id = ${repo}`,
     ),
@@ -620,9 +632,9 @@ describe("pilot purge", () => {
     expect(JSON.stringify(purges[0])).not.toContain(A.login);
   });
 
-  it("I-PURGE-2 every table of TABLE_NAMES except pilot_purges and service_state has a purge entry; a table without one is caught", async () => {
-    const covered = Object.keys(OWNED_ROWS);
-    const exempt = ["pilot_purges", "service_state"];
+  it("I-PURGE-2 every installation-scoped table is classified as deleted or preserved", async () => {
+    const covered = [...Object.keys(OWNED_ROWS), ...Object.keys(PRESERVED_ROWS)];
+    const exempt = ["pilot_purges", "service_state", "billing_teams", "billing_periods"];
     const missing = (names: readonly string[]) =>
       names.filter((n) => !exempt.includes(n) && !covered.includes(n));
     expect(missing(TABLE_NAMES)).toEqual([]);
