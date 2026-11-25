@@ -96,13 +96,23 @@ export const consoleRoutes =
     };
     const verifyIdentity = async (user: User) => {
       const first = (await installations())[0];
-      if (!first) throw new ConsoleError(403, "No active Graft installation is available.");
-      const gh = await deps.github.forInstallation(Number(first.id));
+      const gh = first ? await deps.github.forInstallation(Number(first.id)) : deps.github.asApp();
       const { data } = await gh.request("GET /users/{username}", { username: user.login });
       if (data.id !== user.id)
         throw new ConsoleError(403, "Your GitHub identity changed. Sign in again.");
     };
-    const canAdmin = async (installationId: number, fullName: string, user: User) => {
+    const permissionCache = new Map<string, { canAdmin: boolean; expiresAt: number }>();
+    const canAdmin = async (
+      installationId: number,
+      fullName: string,
+      user: User,
+      useCache = true,
+    ) => {
+      const cacheKey = `${installationId}:${user.id}:${fullName.toLowerCase()}`;
+      const cached = permissionCache.get(cacheKey);
+      if (useCache && cached && cached.expiresAt > deps.clock.now().getTime())
+        return cached.canAdmin;
+      if (!useCache) permissionCache.delete(cacheKey);
       const [owner = "", repo = ""] = fullName.split("/");
       const gh = await deps.github.forInstallation(installationId);
       try {
@@ -110,11 +120,43 @@ export const consoleRoutes =
           "GET /repos/{owner}/{repo}/collaborators/{username}/permission",
           { owner, repo, username: user.login },
         );
-        return data.user?.id === user.id && data.permission === "admin";
+        const allowed = data.user?.id === user.id && data.permission === "admin";
+        if (useCache)
+          permissionCache.set(cacheKey, {
+            canAdmin: allowed,
+            expiresAt: deps.clock.now().getTime() + 30_000,
+          });
+        return allowed;
       } catch (err) {
-        if (statusOf(err) === 404) return false;
+        if (statusOf(err) === 404) {
+          if (useCache)
+            permissionCache.set(cacheKey, {
+              canAdmin: false,
+              expiresAt: deps.clock.now().getTime() + 30_000,
+            });
+          return false;
+        }
         throw err;
       }
+    };
+    const mapBounded = async <T, R>(
+      values: readonly T[],
+      concurrency: number,
+      fn: (value: T) => Promise<R>,
+    ): Promise<R[]> => {
+      const result = new Array<R>(values.length);
+      let next = 0;
+      await Promise.all(
+        Array.from({ length: Math.min(concurrency, values.length) }, async () => {
+          while (next < values.length) {
+            const index = next++;
+            const value = values[index];
+            if (value === undefined) continue;
+            result[index] = await fn(value);
+          }
+        }),
+      );
+      return result;
     };
     const resolveRepository = async (fullName: string) => {
       const [owner = "", repo = ""] = fullName.split("/");
@@ -281,7 +323,7 @@ export const consoleRoutes =
       const repositoryId = Number(repo.id);
       if (!Number.isSafeInteger(repositoryId))
         throw new ConsoleError(502, "GitHub returned an unsupported repository id.");
-      if (!(await canAdmin(resolved.installationId, repo.full_name, user))) {
+      if (!(await canAdmin(resolved.installationId, repo.full_name, user, false))) {
         throw new ConsoleError(403, "Only a repository administrator can change Graft activation.");
       }
       await deps.db.transaction().execute(async (tx) => {
@@ -373,14 +415,14 @@ export const consoleRoutes =
               .execute()
           : [];
       const admins = new Map(
-        await Promise.all(
-          records.map(
-            async (repo) =>
-              [
-                Number(repo.id),
-                await canAdmin(Number(repo.installation_id), repo.full_name, user),
-              ] as const,
-          ),
+        await mapBounded(
+          records,
+          5,
+          async (repo) =>
+            [
+              Number(repo.id),
+              await canAdmin(Number(repo.installation_id), repo.full_name, user),
+            ] as const,
         ),
       );
       return teams.map((team) => ({
@@ -393,25 +435,35 @@ export const consoleRoutes =
     });
 
     app.post("/internal/console/billing/repositories", async (req) => {
-      const { user } = z.object({ user: userSchema }).parse(req.body);
+      const { user, after } = z
+        .object({
+          user: userSchema,
+          after: z.number().int().nonnegative().safe().default(0),
+        })
+        .parse(req.body);
       await verifyIdentity(user);
       const activeInstallationIds = (await installations()).map((inst) => Number(inst.id));
-      if (!activeInstallationIds.length) return [];
+      if (!activeInstallationIds.length) return { after, repositories: [], next: null };
       const rows = await deps.db
         .selectFrom("repositories")
         .select(["id", "full_name", "installation_id"])
         .where("installation_id", "in", activeInstallationIds)
         .where("removed_at", "is", null)
-        .orderBy("full_name")
+        .where("id", ">", after)
+        .orderBy("id")
+        .limit(50)
         .execute();
-      const repositories = await Promise.all(
-        rows.map(async (repo) => ({
-          id: Number(repo.id),
-          fullName: repo.full_name,
-          canAdmin: await canAdmin(Number(repo.installation_id), repo.full_name, user),
-        })),
-      );
-      return repositories;
+      const repositories = await mapBounded(rows, 5, async (repo) => ({
+        id: Number(repo.id),
+        fullName: repo.full_name,
+        canAdmin: await canAdmin(Number(repo.installation_id), repo.full_name, user),
+      }));
+      const last = rows.at(-1);
+      return {
+        after,
+        repositories,
+        next: rows.length === 50 && last ? Number(last.id) : null,
+      };
     });
 
     app.post("/internal/console/billing/statement", async (req) => {
@@ -470,7 +522,7 @@ export const consoleRoutes =
       ) {
         throw new ConsoleError(403, "That repository's installation is inactive or not allowed.");
       }
-      if (!(await canAdmin(Number(repo.installation_id), repo.full_name, user))) {
+      if (!(await canAdmin(Number(repo.installation_id), repo.full_name, user, false))) {
         throw new ConsoleError(
           403,
           "Only a repository administrator can change billing membership.",

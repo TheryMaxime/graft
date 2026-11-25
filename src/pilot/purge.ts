@@ -1,8 +1,7 @@
 /**
- * Offboarding (step 6, T11, D11): delete everything Graft holds for one installation, and write a
- * `pilot_purges` row (installation id, counts, time; no login) that outlives it. The application
- * tables are deleted by the foreign-key cascade from `installations`; `webhook_deliveries` (no FK)
- * and the pg-boss jobs (whose data holds webhook payloads) are deleted explicitly.
+ * Offboarding (step 6, T11, D11): delete installation-scoped operational data and write a
+ * `pilot_purges` row (installation id, counts, time; no login) that outlives it. Immutable billing
+ * history is retained; `webhook_deliveries` and matching pg-boss jobs are deleted explicitly.
  */
 import { type RawBuilder, sql } from "kysely";
 import type { Db } from "../db/client.js";

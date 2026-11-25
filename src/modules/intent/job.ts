@@ -11,7 +11,7 @@ import { PermanentJobError } from "../../queue/errors.js";
 import { defineJob } from "../../queue/job.js";
 import { recordCard, recordOutcome } from "../../telemetry/metrics.js";
 import { annotate, withSpan } from "../../telemetry/tracing.js";
-import { billingTeamSnapshot } from "../billing/ledger.js";
+import { billingTeamSnapshot, storeBillingCalls } from "../billing/ledger.js";
 import { type Change, getChange, type LivePull, upsertChangeFromPull } from "../changes/index.js";
 import { ensureRepository, getActiveInstallation } from "../installations/index.js";
 import { computeProvenance, fetchPrCommits } from "../provenance/index.js";
@@ -241,6 +241,16 @@ export async function generateIntent(data: GenerateData, ctx: JobContext): Promi
   opts.startedAtMs = startedAtMs;
   opts.installationId = data.installationId;
   opts.captureBillingTeams = () => billingTeamSnapshot(ctx.db, data.repositoryId);
+  opts.persistSpendCall = (call) =>
+    ctx.db.transaction().execute((tx) =>
+      storeBillingCalls(tx, {
+        calls: [call],
+        repositoryId: data.repositoryId,
+        repositoryName: `${data.owner}/${data.repo}`,
+        changeId: change.id,
+        recordedAt: ctx.clock.now(),
+      }),
+    );
   const prepared = prepareCardInputs(inputs, opts);
 
   const fresh = (current: Change | undefined): boolean =>

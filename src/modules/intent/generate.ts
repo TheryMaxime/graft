@@ -3,11 +3,12 @@
  * step 4 eval harness runs offline. Never throws for model failures; never logs prompts, diffs
  * or model output.
  */
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Attributes } from "@opentelemetry/api";
 import type { Config } from "../../config/index.js";
 import type { Logger } from "../../core/logger.js";
 import type { RiskClass } from "../../db/schema.js";
+import type { Price } from "../../llm/pricing.js";
 import { cost, PRICING_VERIFIED_AT, roundUsd } from "../../llm/pricing.js";
 import {
   type LlmClient,
@@ -84,6 +85,8 @@ export interface GenerateOptions {
   installationId?: number;
   /** Read repository-team membership immediately before each model request. */
   captureBillingTeams?: () => Promise<{ id: string; name: string }[]>;
+  /** Persist each completed provider response before a later step can fail. */
+  persistSpendCall?: (call: SpendCall) => Promise<void>;
 }
 
 export interface VerifierClaim {
@@ -153,10 +156,12 @@ export interface CardResult {
 }
 
 export interface SpendCall {
+  id?: string;
   model: string;
   usage: LlmUsage;
   costUsd: number | null;
   priceVersion: string | null;
+  priceSnapshot?: Price | null;
   spentAt: Date;
   billingTeams: { id: string; name: string }[];
 }
@@ -476,7 +481,8 @@ export async function runCard(
       if (remaining < MIN_REMAINING_MS) return { ok: false, reason: "deadline_exceeded" };
       const billingTeams = (await o.captureBillingTeams?.()) ?? [];
       const spentAt = new Date(o.nowMs());
-      const native = llm.capabilities?.(model, o.installationId).nativeSchema ?? true;
+      const capabilities = llm.capabilities?.(model, o.installationId);
+      const native = capabilities?.nativeSchema ?? true;
       const res = await llm.complete({
         ...base,
         system: systemWithSchema(base.system, base.outputSchema, native),
@@ -487,14 +493,16 @@ export async function runCard(
         deadlineMs: remaining,
       });
       spent.calls += 1;
-      const callPrice = callCost(res.usage, res.model, llm);
+      const reportsUsage = capabilities?.reportsUsage ?? true;
+      const callPrice = reportsUsage ? callCost(res.usage, res.model, llm) : null;
       const callTokens =
         res.usage.inputTokens +
         res.usage.outputTokens +
         res.usage.cacheReadTokens +
         res.usage.cacheWriteTokens;
-      if (callTokens > 0) {
-        spent.spendCalls.push({
+      if (res.ok || callTokens > 0) {
+        const spendCall: SpendCall = {
+          id: randomUUID(),
           model: res.model,
           usage: { ...res.usage },
           costUsd: callPrice,
@@ -503,9 +511,12 @@ export async function runCard(
               ? null
               : (llm.priceVersion?.(res.model, o.installationId) ??
                 `anthropic:${PRICING_VERIFIED_AT}`),
+          priceSnapshot: llm.priceSnapshot?.(res.model, o.installationId) ?? null,
           spentAt,
           billingTeams,
-        });
+        };
+        await o.persistSpendCall?.(spendCall);
+        spent.spendCalls.push(spendCall);
       }
       if (spent.costUsd !== null) {
         spent.costUsd = callPrice === null ? null : roundUsd(spent.costUsd + callPrice);

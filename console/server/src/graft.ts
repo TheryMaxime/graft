@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import type { BillingRepository, BillingStatement, BillingTeam } from "../../shared/api.js";
+import type { BillingRepositoriesPage, BillingStatement, BillingTeam } from "../../shared/api.js";
 import type {
   ConsoleUser,
   RepositoriesResponse,
@@ -32,7 +32,7 @@ export interface GraftApi {
     confirmation?: string,
   ): Promise<{ enabled: boolean; filtering: boolean }>;
   billingTeams(user: ConsoleUser): Promise<BillingTeam[]>;
-  billingRepositories(user: ConsoleUser): Promise<BillingRepository[]>;
+  billingRepositories(user: ConsoleUser, after: number): Promise<BillingRepositoriesPage>;
   billingStatement(user: ConsoleUser, month: string): Promise<BillingStatement>;
   billingChange(
     user: ConsoleUser,
@@ -95,7 +95,7 @@ export function graftApi(
         ...(confirmation === undefined ? {} : { confirmation }),
       }),
     billingTeams: (user) => call("billing/teams", { user }),
-    billingRepositories: (user) => call("billing/repositories", { user }),
+    billingRepositories: (user, after) => call("billing/repositories", { user, after }),
     billingStatement: (user, month) => call("billing/statement", { user, month }),
     billingChange: (user, action, values) => call(`billing/${action}`, { user, ...values }),
   };

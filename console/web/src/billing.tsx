@@ -1,10 +1,16 @@
-import { useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import type {
-  BillingRepository,
+  BillingRepositoriesPage,
   BillingStatement,
   BillingStatementLine,
   BillingTeam,
 } from "../../shared/api.js";
+import {
+  adjustmentPeriod,
+  aggregateTeamTotals,
+  exportCsv,
+  statementForMonth,
+} from "../../shared/billing.js";
 import { postJson, qs, useApi } from "./api.js";
 import { Empty, Failure, Loading } from "./components.js";
 
@@ -13,11 +19,6 @@ function previousMonth(): string {
   date.setUTCDate(1);
   date.setUTCMonth(date.getUTCMonth() - 1);
   return date.toISOString().slice(0, 7);
-}
-
-function csvCell(value: unknown): string {
-  const text = String(value ?? "");
-  return `"${text.replaceAll('"', '""')}"`;
 }
 
 function download(name: string, type: string, content: string): void {
@@ -29,27 +30,6 @@ function download(name: string, type: string, content: string): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function exportCsv(statement: BillingStatement): string {
-  const fields: (keyof BillingStatementLine)[] = [
-    "teamName",
-    "repositoryName",
-    "model",
-    "lineType",
-    "description",
-    "calls",
-    "unpricedCalls",
-    "inputTokens",
-    "outputTokens",
-    "cacheReadTokens",
-    "cacheWriteTokens",
-    "costUsd",
-  ];
-  return [
-    fields.join(","),
-    ...statement.lines.map((line) => fields.map((field) => csvCell(line[field])).join(",")),
-  ].join("\r\n");
-}
-
 const usd = (value: string | null) =>
   value === null
     ? "Unpriced"
@@ -59,8 +39,27 @@ const usd = (value: string | null) =>
 
 export function Billing() {
   const [month, setMonth] = useState(previousMonth);
+  const [repositoryAfter, setRepositoryAfter] = useState(0);
   const teams = useApi<BillingTeam[]>("/api/billing/teams");
-  const repositories = useApi<BillingRepository[]>("/api/billing/repositories");
+  const repositories = useApi<BillingRepositoriesPage>(
+    `/api/billing/repositories${qs({ after: repositoryAfter })}`,
+  );
+  const [repositoryChoices, setRepositoryChoices] = useState<
+    BillingRepositoriesPage["repositories"]
+  >([]);
+  const currentRepositoryPage =
+    repositories.data?.after === repositoryAfter ? repositories.data : undefined;
+  useEffect(() => {
+    if (!currentRepositoryPage) return;
+    setRepositoryChoices((previous) => {
+      const base = repositoryAfter === 0 ? [] : previous;
+      const byId = new Map(base.map((repository) => [repository.id, repository]));
+      for (const repository of currentRepositoryPage.repositories) {
+        byId.set(repository.id, repository);
+      }
+      return [...byId.values()];
+    });
+  }, [currentRepositoryPage, repositoryAfter]);
   const statement = useApi<BillingStatement>(`/api/billing/statement${qs({ month })}`);
   const [teamName, setTeamName] = useState("");
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -73,6 +72,7 @@ export function Billing() {
 
   const refresh = () => {
     teams.reload();
+    setRepositoryAfter(0);
     repositories.reload();
     statement.reload();
   };
@@ -120,27 +120,15 @@ export function Billing() {
       },
       line.id,
     );
-    if (
-      typeof result === "object" &&
-      result !== null &&
-      "period" in result &&
-      typeof result.period === "string"
-    ) {
-      setMonth(result.period);
-    }
+    const period = adjustmentPeriod(result);
+    if (period === null) return;
+    setMonth(period);
     setAdjustment({ amountUsd: "", reason: "" });
     setEditingLine(null);
   }
 
-  const exportStatement = statement.data;
-  const teamTotals = new Map<string, { usd: number; unpriced: number; calls: number }>();
-  for (const line of exportStatement?.lines ?? []) {
-    const total = teamTotals.get(line.teamName) ?? { usd: 0, unpriced: 0, calls: 0 };
-    total.usd += Number(line.costUsd ?? 0);
-    total.unpriced += line.unpricedCalls;
-    total.calls += line.calls;
-    teamTotals.set(line.teamName, total);
-  }
+  const exportStatement = statementForMonth(statement.data, month);
+  const teamTotals = aggregateTeamTotals(exportStatement?.lines ?? []);
 
   return (
     <div class="register-wrap billing">
@@ -181,6 +169,19 @@ export function Billing() {
                 Create team
               </button>
             </form>
+            {currentRepositoryPage?.next !== null && currentRepositoryPage?.next !== undefined ? (
+              <button
+                class="btn btn--ghost"
+                type="button"
+                disabled={repositories.loading}
+                onClick={() => setRepositoryAfter(currentRepositoryPage.next ?? 0)}
+              >
+                {repositories.loading ? "Loading repositories…" : "Load more repositories"}
+              </button>
+            ) : null}
+            {repositories.error ? (
+              <Failure error={repositories.error} retry={repositories.reload} />
+            ) : null}
             {teams.data.length ? (
               <div class="billing__teams">
                 {teams.data.map((team) => (
@@ -283,7 +284,7 @@ export function Billing() {
                       {!team.repositories.length ? <li>No repositories attached.</li> : null}
                     </ul>
                     {!team.archivedAt &&
-                    repositories.data?.some(
+                    repositoryChoices.some(
                       (repo) =>
                         repo.canAdmin && !team.repositories.some((member) => member.id === repo.id),
                     ) ? (
@@ -308,7 +309,7 @@ export function Billing() {
                           }}
                         >
                           <option value="">Choose an administered repository</option>
-                          {(repositories.data ?? [])
+                          {repositoryChoices
                             .filter(
                               (repo) =>
                                 repo.canAdmin &&
@@ -403,9 +404,9 @@ export function Billing() {
               </div>
             </div>
             <dl class="billing__totals">
-              {[...teamTotals.entries()].map(([name, total]) => (
-                <div key={name}>
-                  <dt>{name}</dt>
+              {[...teamTotals.entries()].map(([teamId, total]) => (
+                <div key={teamId ?? "unattributed"}>
+                  <dt>{total.name}</dt>
                   <dd>
                     {total.calls} calls · {usd(total.usd.toFixed(2))}
                     {total.unpriced ? ` · ${total.unpriced} unpriced` : ""}

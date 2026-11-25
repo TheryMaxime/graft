@@ -31,6 +31,12 @@ export interface BillingRepository {
   canAdmin: boolean;
 }
 
+export interface BillingRepositoriesPage {
+  after: number;
+  repositories: BillingRepository[];
+  next: number | null;
+}
+
 export interface BillingStatementLine {
   id: string;
   teamId: string | null;
@@ -47,6 +53,8 @@ export interface BillingStatementLine {
   cacheReadTokens: number;
   cacheWriteTokens: number;
   costUsd: string | null;
+  sourcePeriod: string | null;
+  sourceLineId: string | null;
 }
 
 export interface BillingStatement {

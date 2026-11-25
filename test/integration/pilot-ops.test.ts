@@ -995,13 +995,13 @@ describe("operations CLI", () => {
 
     // One migration behind: every command stops with the same instruction.
     const down = await migrateDownOne(t.db);
-    expect(down).toEqual(["0019_team_chargeback"]);
+    expect(down).toEqual(["0020_billing_auditability"]);
     try {
       err = "";
       expect(await opsMain(["pilot", "doctor", "--installation", "1"], io, deps())).toBe(2);
       expect(err).toBe("run pnpm db:migrate\n");
     } finally {
-      expect(await migrateToLatest(t.db)).toEqual(["0019_team_chargeback"]);
+      expect(await migrateToLatest(t.db)).toEqual(["0020_billing_auditability"]);
     }
   });
 });

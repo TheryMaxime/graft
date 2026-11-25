@@ -16,7 +16,7 @@ const bridge = (): GraftApi => ({
   search: vi.fn(async () => ({ repositories: [], next: null, incomplete: false })),
   activation: vi.fn(async (_u, _r, enabled) => ({ enabled, filtering: true })),
   billingTeams: vi.fn(async () => []),
-  billingRepositories: vi.fn(async () => []),
+  billingRepositories: vi.fn(async (_u, after) => ({ after, repositories: [], next: null })),
   billingStatement: vi.fn(async (_u, month) => ({
     month,
     closedAt: null,
@@ -189,6 +189,21 @@ describe("organization access and repository management", () => {
       headers: { cookie: cookie() },
     });
     expect(invalid.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it("fails billing requests explicitly when the optional Graft bridge is absent", async () => {
+    const app = await testApp({
+      config: githubConfig({ CONSOLE_ALLOWED_USERS: "org-member" }),
+      now: () => NOW,
+    });
+    for (const url of ["/api/billing/teams", "/api/billing/repositories?after=0"]) {
+      const response = await app.inject({ url, headers: { cookie: cookie() } });
+      expect(response.statusCode).toBe(503);
+      expect(response.json()).toMatchObject({
+        message: "Repository management needs CONSOLE_GRAFT_URL and CONSOLE_GRAFT_SECRET.",
+      });
+    }
     await app.close();
   });
 

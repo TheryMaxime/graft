@@ -120,6 +120,60 @@ function call(action: string, body: object, opts: { time?: number; signature?: s
 const enable = () => call("activation", { user: USER, repository: REPO, enabled: true });
 
 describe("repository activation", () => {
+  it("paginates repository permission checks and bypasses cached permissions for mutations", async () => {
+    await upsertRepositories(
+      t.db,
+      1000001,
+      Array.from({ length: 60 }, (_, index) => ({
+        id: 2001000 + index,
+        fullName: `graft-sandbox/repo-${index}`,
+        private: true,
+      })),
+      FIXED_NOW,
+    );
+    const first = await call("billing/repositories", { user: USER, after: 0 });
+    expect(first.statusCode).toBe(200);
+    expect(first.json().repositories).toHaveLength(50);
+    expect(first.json().next).toBe(2001047);
+    const permissionRequests = () =>
+      requests.filter((request) => request.endsWith("/collaborators/operator/permission")).length;
+    const countAfterFirstPage = permissionRequests();
+    expect(countAfterFirstPage).toBe(50);
+
+    admin = false;
+    const denied = await call("billing/repository", {
+      user: USER,
+      teamId: "00000000-0000-4000-8000-000000000001",
+      repositoryId: 2001000,
+      attached: true,
+    });
+    expect(denied.statusCode).toBe(403);
+    expect(permissionRequests()).toBe(countAfterFirstPage + 1);
+    admin = true;
+
+    const second = await call("billing/repositories", {
+      user: USER,
+      after: first.json().next,
+    });
+    expect(second.statusCode).toBe(200);
+    expect(second.json().repositories).toHaveLength(12);
+    expect(second.json().next).toBeNull();
+    const repeated = await call("billing/repositories", { user: USER, after: 0 });
+    expect(repeated.statusCode).toBe(200);
+    expect(permissionRequests()).toBe(64);
+  });
+
+  it("keeps historical statement access when no active installation remains", async () => {
+    await t.db
+      .updateTable("installations")
+      .set({ deleted_at: FIXED_NOW })
+      .where("id", "=", 1000001)
+      .execute();
+    const statement = await call("billing/statement", { user: USER, month: "2026-10" });
+    expect(statement.statusCode).toBe(200);
+    expect(statement.json()).toMatchObject({ month: "2026-10", lines: [] });
+  });
+
   it("allows repository administrators to manage chargeback memberships", async () => {
     const created = await call("billing/create", { user: USER, name: "Platform" });
     expect(created.statusCode).toBe(200);

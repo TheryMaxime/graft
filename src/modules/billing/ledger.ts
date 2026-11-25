@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { sql, type Transaction } from "kysely";
 import type { Db } from "../../db/client.js";
 import type { Database } from "../../db/schema.js";
@@ -48,13 +49,6 @@ export async function storeBillingCalls(
   },
 ): Promise<void> {
   for (const call of o.calls) {
-    const callTokens =
-      call.usage.inputTokens +
-      call.usage.outputTokens +
-      call.usage.cacheReadTokens +
-      call.usage.cacheWriteTokens;
-    if (callTokens === 0) continue;
-
     const originalPeriod = monthStart(call.spentAt);
     await sql`select pg_advisory_xact_lock(hashtext('graft-billing'), hashtext(${monthId(originalPeriod)}))`.execute(
       ex,
@@ -68,6 +62,7 @@ export async function storeBillingCalls(
     const spend = await ex
       .insertInto("billing_spend_calls")
       .values({
+        id: call.id ?? randomUUID(),
         repository_id: o.repositoryId,
         repository_name: o.repositoryName,
         change_id: o.changeId,
@@ -78,15 +73,19 @@ export async function storeBillingCalls(
         cache_write_tokens: call.usage.cacheWriteTokens,
         cost_usd: call.costUsd,
         price_version: call.priceVersion,
+        price_snapshot: call.priceSnapshot ? JSON.stringify(call.priceSnapshot) : null,
         spent_at: call.spentAt,
       })
+      .onConflict((oc) => oc.column("id").doNothing())
       .returning("id")
-      .executeTakeFirstOrThrow();
+      .executeTakeFirst();
+    if (!spend) continue;
 
     const teams = call.billingTeams.length
       ? [...call.billingTeams].sort((a, b) => a.id.localeCompare(b.id))
       : [{ id: null, name: "Unattributed" }];
-    const totalCents = call.costUsd === null ? null : Math.round(call.costUsd * 100);
+    const totalCents =
+      call.costUsd === null ? null : Math.round(Math.round(call.costUsd * 1e8) / 1e6);
     const allocationRows = teams.map((team, index) => ({
       spend_call_id: spend.id,
       team_id: team.id,
@@ -126,7 +125,7 @@ export async function storeBillingCalls(
         .insertInto("billing_adjustments")
         .values(
           allocationRows.map((allocation) => ({
-            period_start: target,
+            period_start: `${monthId(target)}-01`,
             team_id: allocation.team_id,
             team_name: allocation.team_name,
             repository_id: o.repositoryId,

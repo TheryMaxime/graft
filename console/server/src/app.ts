@@ -253,8 +253,15 @@ export async function buildApp(deps: AppDeps): Promise<AppServer> {
     return graft?.activation(user, body.repository, body.enabled, body.confirmation);
   });
 
-  app.get("/api/billing/teams", async (req) => graft?.billingTeams(principal(req)));
-  app.get("/api/billing/repositories", async (req) => graft?.billingRepositories(principal(req)));
+  app.get("/api/billing/teams", async (req) => {
+    const user = principal(req);
+    return graft?.billingTeams(user);
+  });
+  app.get("/api/billing/repositories", async (req) => {
+    const user = principal(req);
+    const q = parse(z.object({ after: int(0, Number.MAX_SAFE_INTEGER).default(0) }), req.query);
+    return graft?.billingRepositories(user, q.after);
+  });
   app.get("/api/billing/statement", async (req) => {
     const user = principal(req);
     const q = parse(z.object({ month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/) }), req.query);

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { costAt, PRICING_VERIFIED_AT, priceFor } from "./pricing.js";
+import { costAt, PRICING_VERIFIED_AT, type Price, priceFor } from "./pricing.js";
 import { type LlmProvider, splitModelRef } from "./registry.js";
 import {
   FULL_CAPABILITIES,
@@ -94,6 +94,13 @@ export function createRouterLlm(routes: readonly RoutedProvider[]): LlmClient {
         return `anthropic:${PRICING_VERIFIED_AT}`;
       }
       return null;
+    },
+    priceSnapshot(ref: string, installationId?: number): Price | null {
+      const { r, model } = route(ref, installationId);
+      return (
+        priceFor(model, r.provider.prices) ??
+        (r.provider.kind === "anthropic" ? priceFor(model) : null)
+      );
     },
   };
 }

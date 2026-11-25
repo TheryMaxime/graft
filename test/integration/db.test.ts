@@ -100,6 +100,7 @@ describe("database", () => {
         "0017_intent_requested",
         "0018_repository_filter",
         "0019_team_chargeback",
+        "0020_billing_auditability",
       ]);
       expect(await migrateToLatest(db)).toEqual([]);
       const again = await tableNames(db);
@@ -678,6 +679,9 @@ describe("database", () => {
     const migrator = createMigrator(db);
     try {
       expect((await migrator.migrateDown()).results?.[0]?.migrationName).toBe(
+        "0020_billing_auditability",
+      );
+      expect((await migrator.migrateDown()).results?.[0]?.migrationName).toBe(
         "0019_team_chargeback",
       );
       expect((await migrator.migrateDown()).results?.[0]?.migrationName).toBe(
@@ -746,6 +750,7 @@ describe("database", () => {
         "0017_intent_requested",
         "0018_repository_filter",
         "0019_team_chargeback",
+        "0020_billing_auditability",
       ]);
     }
     expect(await tableNames(db)).toContain("change_provenance");
@@ -757,6 +762,9 @@ describe("database", () => {
   it("I-DB-8 0003 down then up: down restores the 0001 intent_cards and drops intent_feedback", async () => {
     const migrator = createMigrator(db);
     try {
+      expect((await migrator.migrateDown()).results?.[0]?.migrationName).toBe(
+        "0020_billing_auditability",
+      );
       expect((await migrator.migrateDown()).results?.[0]?.migrationName).toBe(
         "0019_team_chargeback",
       );
@@ -826,6 +834,7 @@ describe("database", () => {
         "0017_intent_requested",
         "0018_repository_filter",
         "0019_team_chargeback",
+        "0020_billing_auditability",
       ]);
     }
     expect(await tableNames(db)).toContain("intent_feedback");
@@ -876,6 +885,9 @@ describe("database", () => {
       );
     const migrator = createMigrator(db);
     try {
+      expect((await migrator.migrateDown()).results?.[0]?.migrationName).toBe(
+        "0020_billing_auditability",
+      );
       expect((await migrator.migrateDown()).results?.[0]?.migrationName).toBe(
         "0019_team_chargeback",
       );
@@ -964,6 +976,9 @@ describe("database", () => {
     const migrator = createMigrator(db);
     try {
       expect((await migrator.migrateDown()).results?.[0]?.migrationName).toBe(
+        "0020_billing_auditability",
+      );
+      expect((await migrator.migrateDown()).results?.[0]?.migrationName).toBe(
         "0019_team_chargeback",
       );
       expect((await migrator.migrateDown()).results?.[0]?.migrationName).toBe(
@@ -1031,6 +1046,7 @@ describe("database", () => {
         "0017_intent_requested",
         "0018_repository_filter",
         "0019_team_chargeback",
+        "0020_billing_auditability",
       ]);
     }
     expect(await policyColumns()).toEqual(upColumns);
@@ -1058,6 +1074,9 @@ describe("database", () => {
     for (const t of stepSix) expect(await tableNames(db), t).toContain(t);
     const migrator = createMigrator(db);
     try {
+      expect((await migrator.migrateDown()).results?.[0]?.migrationName).toBe(
+        "0020_billing_auditability",
+      );
       expect((await migrator.migrateDown()).results?.[0]?.migrationName).toBe(
         "0019_team_chargeback",
       );
@@ -1110,6 +1129,7 @@ describe("database", () => {
         "0017_intent_requested",
         "0018_repository_filter",
         "0019_team_chargeback",
+        "0020_billing_auditability",
       ]);
     }
     for (const t of stepSix) expect(await tableNames(db), t).toContain(t);
@@ -1147,6 +1167,9 @@ describe("database", () => {
       .executeTakeFirstOrThrow();
     const migrator = createMigrator(db);
     try {
+      expect((await migrator.migrateDown()).results?.[0]?.migrationName).toBe(
+        "0020_billing_auditability",
+      );
       expect((await migrator.migrateDown()).results?.[0]?.migrationName).toBe(
         "0019_team_chargeback",
       );
@@ -1194,6 +1217,7 @@ describe("database", () => {
         "0017_intent_requested",
         "0018_repository_filter",
         "0019_team_chargeback",
+        "0020_billing_auditability",
       ]);
     }
     const rows = await sql<{ user_id: number; verified: boolean }>`

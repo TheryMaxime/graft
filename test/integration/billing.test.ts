@@ -66,8 +66,12 @@ afterAll(async () => {
   await db.destroy();
 });
 
-async function save(spend: SpendCall, recordedAt = spend.spentAt) {
-  const teams = await billingTeamSnapshot(db, REPOSITORY_ID);
+async function save(
+  spend: SpendCall,
+  recordedAt = spend.spentAt,
+  snapshot?: { id: string; name: string }[],
+) {
+  const teams = snapshot ?? (await billingTeamSnapshot(db, REPOSITORY_ID));
   await db.transaction().execute((tx) =>
     storeBillingCalls(tx, {
       calls: [{ ...spend, billingTeams: teams }],
@@ -80,6 +84,51 @@ async function save(spend: SpendCall, recordedAt = spend.spentAt) {
 }
 
 describe("team chargeback ledger", () => {
+  it("rounds through ledger precision and makes persisted call IDs idempotent", async () => {
+    const spend = {
+      ...call(new Date("2026-09-12T10:00:00Z"), 0.145),
+      id: randomUUID(),
+      priceSnapshot: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0.5 },
+    };
+    await save(spend);
+    await save(spend);
+    const calls = await db.selectFrom("billing_spend_calls").selectAll().execute();
+    const allocations = await db.selectFrom("billing_spend_allocations").selectAll().execute();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.price_snapshot).toEqual(spend.priceSnapshot);
+    expect(allocations.map((row) => row.cost_usd)).toEqual(["0.05", "0.05", "0.05"]);
+  });
+
+  it("retains a successful zero-token call with unknown usage and blocks period closure", async () => {
+    await save({
+      ...call(new Date("2026-09-12T10:00:00Z"), null),
+      id: randomUUID(),
+      usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    });
+    expect(await db.selectFrom("billing_spend_calls").selectAll().execute()).toHaveLength(1);
+    const statement = await getBillingStatement(db, "2026-09");
+    expect(statement.lines).toHaveLength(3);
+    expect(statement.lines[0]).toMatchObject({ calls: 1, unpricedCalls: 1, costUsd: null });
+    expect(await closeEligibleBillingPeriods(db, new Date("2026-10-02T00:05:00Z"))).toMatchObject({
+      blocked: [{ month: "2026-09", unpricedCalls: 1 }],
+    });
+  });
+
+  it("keeps live statement IDs unique when team display names change mid-period", async () => {
+    const firstTeam = await billingTeamSnapshot(db, REPOSITORY_ID);
+    await save(call(new Date("2026-09-12T10:00:00Z"), 0.05), undefined, firstTeam);
+    const teamId = TEAM_IDS[0];
+    if (!teamId) throw new Error("test team id is missing");
+    await db
+      .updateTable("billing_teams")
+      .set({ name: "Renamed team" })
+      .where("id", "=", teamId)
+      .execute();
+    await save(call(new Date("2026-09-13T10:00:00Z"), 0.05));
+    const statement = await getBillingStatement(db, "2026-09");
+    expect(new Set(statement.lines.map((line) => line.id)).size).toBe(statement.lines.length);
+  });
+
   it("freezes equal allocation and distributes token/cents remainders deterministically", async () => {
     await save(call(new Date("2026-09-12T10:00:00Z"), 0.05));
     const allocations = await db
@@ -130,8 +179,49 @@ describe("team chargeback ledger", () => {
     });
     expect(correction.period).toBe("2026-10");
     const later = await getBillingStatement(db, "2026-10");
+    const manualCorrection = later.lines.find(
+      (line) => line.description === "Provider reconciliation",
+    );
+    expect(manualCorrection).toMatchObject({
+      calls: 0,
+      sourcePeriod: "2026-09-01",
+      sourceLineId: usageLine?.id,
+    });
     expect(later.lines.filter((line) => line.lineType === "adjustment")).toHaveLength(4);
-    expect(later.lines.some((line) => line.description === "Provider reconciliation")).toBe(true);
+    await closeEligibleBillingPeriods(db, new Date("2026-11-02T00:05:00Z"));
+    expect((await getBillingStatement(db, "2026-10")).lines).toContainEqual(
+      expect.objectContaining({
+        description: "Provider reconciliation",
+        calls: 0,
+        sourcePeriod: "2026-09-01",
+        sourceLineId: usageLine?.id,
+      }),
+    );
+  });
+
+  it("skips already closed correction months while preserving the original source line", async () => {
+    await save(call(new Date("2026-09-12T10:00:00Z"), 0.05));
+    await closeEligibleBillingPeriods(db, new Date("2026-10-02T00:05:00Z"));
+    const source = (await getBillingStatement(db, "2026-09")).lines[0];
+    if (!source) throw new Error("test source line is missing");
+    await db
+      .insertInto("billing_periods")
+      .values({ period_start: "2026-10-01", closed_at: new Date(), closed_by: "test" })
+      .execute();
+    const result = await createBillingAdjustment(db, {
+      sourcePeriod: "2026-09",
+      sourceLineId: source.id,
+      amountUsd: "1.00",
+      reason: "After close",
+      actor: "operator",
+      now: new Date("2026-10-03T00:00:00Z"),
+    });
+    expect(result.period).toBe("2026-11");
+    expect((await getBillingStatement(db, "2026-11")).lines[0]).toMatchObject({
+      sourcePeriod: "2026-09-01",
+      sourceLineId: source.id,
+      calls: 0,
+    });
   });
 
   it("leaves a month open while any model call is unpriced", async () => {

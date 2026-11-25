@@ -36,6 +36,44 @@ const OPTS = genOptions();
 const { fast: FAST, strong: STRONG } = OPTS.models;
 
 describe("generateCard", () => {
+  it("U-GEN-27 records successful usage-unknown responses before continuing generation", async () => {
+    const llm = scriptedLlm({
+      writer: { ...W(), usage: { inputTokens: 0, outputTokens: 0 } },
+      verifier: (req) => ({
+        ...agreeingVerifier(req),
+        usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      }),
+    });
+    llm.capabilities = () => ({ ...FULL_CAPABILITIES, reportsUsage: false });
+    const persisted: NonNullable<import("../../src/modules/intent/generate.js").SpendCall>[] = [];
+    const result = await runCard(prepareCardInputs(inputs(), OPTS), llm, {
+      ...OPTS,
+      persistSpendCall: async (call) => {
+        persisted.push(call);
+      },
+    });
+    expect(result.status).toBe("ok");
+    expect(result.spendCalls).toHaveLength(2);
+    expect(
+      result.spendCalls?.every((call) => call.costUsd === null && call.usage.inputTokens === 0),
+    ).toBe(true);
+    expect(persisted.map((call) => call.id)).toEqual(result.spendCalls?.map((call) => call.id));
+  });
+
+  it("U-GEN-28 waits for spend persistence before making another provider call", async () => {
+    const llm = scriptedLlm({ writer: W(), verifier: agreeingVerifier });
+    const options = {
+      ...OPTS,
+      persistSpendCall: async () => {
+        throw new Error("ledger unavailable");
+      },
+    };
+    await expect(runCard(prepareCardInputs(inputs(), OPTS), llm, options)).rejects.toThrow(
+      "ledger unavailable",
+    );
+    expect(llm.calls).toHaveLength(1);
+  });
+
   it("U-GEN-1 trivial floor: fast writer, strong agreeing verifier, 2 calls, usage summed", async () => {
     const llm = scriptedLlm({ writer: W(), verifier: agreeingVerifier });
     const r = await generateCard(inputs(), llm, OPTS);
@@ -403,7 +441,16 @@ describe("generateCard", () => {
       generateCard(i, scriptedLlm({ writer: W(), verifier: agreeingVerifier }), OPTS);
     const a = await run();
     const b = await run();
-    expect(a).toEqual(b);
+    expect(a.status).toBe(b.status);
+    if (a.status === "ok" && b.status === "ok") {
+      expect({
+        ...a,
+        spendCalls: a.spendCalls?.map(({ id: _id, ...call }) => call),
+      }).toEqual({
+        ...b,
+        spendCalls: b.spendCalls?.map(({ id: _id, ...call }) => call),
+      });
+    }
     expect(i).toEqual(snapshot);
   });
 
@@ -814,7 +861,7 @@ describe("client-side refusal fallback", () => {
     expect(prefix).toMatch(/^Nonce: [0-9a-f]{16}\n/);
     expect(prefix).toContain("DIFF_CANARY");
     expect(
-      prefix.endsWith("</untrusted_data_" + /Nonce: ([0-9a-f]{16})/.exec(prefix)?.[1] + ">\n\n"),
+      prefix.endsWith(`</untrusted_data_${/Nonce: ([0-9a-f]{16})/.exec(prefix)?.[1]}>\n\n`),
     ).toBe(true);
     for (const c of ["TITLE_CANARY", "BODY_CANARY", "CONTEXT_CANARY", "intent_card"]) {
       expect(prefix, c).not.toContain(c);

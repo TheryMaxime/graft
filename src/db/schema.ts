@@ -298,6 +298,7 @@ export interface BillingSpendCallsTable {
   cache_write_tokens: number;
   cost_usd: ColumnType<string | null, string | number | null | undefined, string | number | null>;
   price_version: string | null;
+  price_snapshot: Json<Record<string, number>> | null;
   spent_at: Date;
 }
 
@@ -332,6 +333,8 @@ export interface BillingAdjustmentsTable {
   cache_write_tokens: number;
   cost_usd: ColumnType<string | null, string | number | null | undefined, string | number | null>;
   source_call_id: string | null;
+  source_period: ColumnType<string | null, string | null | undefined, string | null>;
+  source_statement_line_id: string | null;
   reason: string;
   created_by: string;
   created_at: Timestamp;
