@@ -9,6 +9,7 @@ import { type OpsDeps, main as opsMain } from "../../src/bin/graft-ops.js";
 import { loadConfig } from "../../src/config/index.js";
 import { migrateDownOne, migrateToLatest } from "../../src/db/migrator.js";
 import { TABLE_NAMES } from "../../src/db/schema.js";
+import { billingCloseJob } from "../../src/modules/billing/index.js";
 import { feedbackSweepJob } from "../../src/modules/intent/index.js";
 import { scheduleIncidentDetection } from "../../src/modules/pilot/incidents.js";
 import { detectIncident, metricsRollupJob, syncReviewers } from "../../src/modules/pilot/index.js";
@@ -144,7 +145,7 @@ describe("pilot doctor", () => {
     const queue = createPgBossQueue({
       connectionString: t.deps.config.databaseUrl,
       schema: t.deps.config.pgbossSchema,
-      registry: { jobs: [feedbackSweepJob, metricsRollupJob] },
+      registry: { jobs: [feedbackSweepJob, metricsRollupJob, billingCloseJob] },
       log: t.deps.log,
       supervise: true,
     });
@@ -162,7 +163,7 @@ describe("pilot doctor", () => {
       return await fn();
     } finally {
       await queue.stop();
-      await sql`delete from pgboss.schedule where name in ('intent.feedback.sweep', 'pilot.metrics.rollup')`.execute(
+      await sql`delete from pgboss.schedule where name in ('intent.feedback.sweep', 'pilot.metrics.rollup', 'billing.close-periods')`.execute(
         t.db,
       );
     }
@@ -982,13 +983,13 @@ describe("operations CLI", () => {
 
     // One migration behind: every command stops with the same instruction.
     const down = await migrateDownOne(t.db);
-    expect(down).toEqual(["0018_repository_filter"]);
+    expect(down).toEqual(["0019_team_chargeback"]);
     try {
       err = "";
       expect(await opsMain(["pilot", "doctor", "--installation", "1"], io, deps())).toBe(2);
       expect(err).toBe("run pnpm db:migrate\n");
     } finally {
-      expect(await migrateToLatest(t.db)).toEqual(["0018_repository_filter"]);
+      expect(await migrateToLatest(t.db)).toEqual(["0019_team_chargeback"]);
     }
   });
 });

@@ -18,6 +18,44 @@ export interface Me {
   repositoryManagement?: boolean;
 }
 
+export interface BillingTeam {
+  id: string;
+  name: string;
+  archivedAt: string | null;
+  repositories: { id: number; fullName: string; canAdmin: boolean }[];
+}
+
+export interface BillingRepository {
+  id: number;
+  fullName: string;
+  canAdmin: boolean;
+}
+
+export interface BillingStatementLine {
+  id: string;
+  teamId: string | null;
+  teamName: string;
+  repositoryId: number;
+  repositoryName: string;
+  model: string;
+  lineType: "usage" | "adjustment";
+  description: string | null;
+  calls: number;
+  unpricedCalls: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  costUsd: string | null;
+}
+
+export interface BillingStatement {
+  month: string;
+  closedAt: string | null;
+  closedBy: string | null;
+  lines: BillingStatementLine[];
+}
+
 export interface DaySummary {
   /** Local date in the requested time zone, `YYYY-MM-DD`. */
   date: string;

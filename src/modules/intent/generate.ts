@@ -8,7 +8,7 @@ import type { Attributes } from "@opentelemetry/api";
 import type { Config } from "../../config/index.js";
 import type { Logger } from "../../core/logger.js";
 import type { RiskClass } from "../../db/schema.js";
-import { cost, roundUsd } from "../../llm/pricing.js";
+import { cost, PRICING_VERIFIED_AT, roundUsd } from "../../llm/pricing.js";
 import {
   type LlmClient,
   type LlmEffort,
@@ -82,6 +82,8 @@ export interface GenerateOptions {
   log?: Logger;
   /** The installation the card is for; routes per-installation providers (Copilot). */
   installationId?: number;
+  /** Read repository-team membership immediately before each model request. */
+  captureBillingTeams?: () => Promise<{ id: string; name: string }[]>;
 }
 
 export interface VerifierClaim {
@@ -145,7 +147,18 @@ export interface CardResult {
    * unpriced. Absent in results cached before step 6, which are never ledgered.
    */
   costUsd?: number | null;
+  /** Per-model-call usage and the team membership observed immediately before each call. */
+  spendCalls?: SpendCall[];
   inputs: InputStats;
+}
+
+export interface SpendCall {
+  model: string;
+  usage: LlmUsage;
+  costUsd: number | null;
+  priceVersion: string | null;
+  spentAt: Date;
+  billingTeams: { id: string; name: string }[];
 }
 
 /** A card's outcome as span attributes: statuses, risk, call count and cost; never its text. */
@@ -351,6 +364,7 @@ interface Spent {
   calls: number;
   /** null: some call used a model without a price (unpriced). */
   costUsd: number | null;
+  spendCalls: SpendCall[];
 }
 
 function buildUnavailable(
@@ -394,13 +408,19 @@ function buildUnavailable(
     models: { writer: null, firstPass: extra.firstPassModel ?? null, verifier: null },
     usage: { ...spent.usage, calls: spent.calls },
     costUsd: spent.costUsd,
+    spendCalls: spent.spendCalls,
     inputs: p.stats,
   };
 }
 
 /** A card without any model call: budget, too large, not configured. */
 export function unavailableResult(p: PreparedCard, reason: FailureReason): CardResult {
-  return buildUnavailable(p, reason, { usage: ZERO_USAGE, calls: 0, costUsd: 0 });
+  return buildUnavailable(p, reason, {
+    usage: ZERO_USAGE,
+    calls: 0,
+    costUsd: 0,
+    spendCalls: [],
+  });
 }
 
 const FAILURE_MAP: Record<LlmFailure, FailureReason> = {
@@ -423,7 +443,12 @@ export async function runCard(
   if (p.tooLarge) return unavailableResult(p, "too_large");
 
   const deadlineAt = (o.startedAtMs ?? o.nowMs()) + o.deadlineMs;
-  const spent: Spent = { usage: { ...ZERO_USAGE }, calls: 0, costUsd: 0 };
+  const spent: Spent = {
+    usage: { ...ZERO_USAGE },
+    calls: 0,
+    costUsd: 0,
+    spendCalls: [],
+  };
 
   type Called<T> = { ok: true; out: T; model: string } | { ok: false; reason: FailureReason };
 
@@ -449,6 +474,8 @@ export async function runCard(
     for (let attempt = 0; attempt < 2; attempt++) {
       const remaining = deadlineAt - o.nowMs();
       if (remaining < MIN_REMAINING_MS) return { ok: false, reason: "deadline_exceeded" };
+      const billingTeams = (await o.captureBillingTeams?.()) ?? [];
+      const spentAt = new Date(o.nowMs());
       const native = llm.capabilities?.(model, o.installationId).nativeSchema ?? true;
       const res = await llm.complete({
         ...base,
@@ -460,9 +487,28 @@ export async function runCard(
         deadlineMs: remaining,
       });
       spent.calls += 1;
+      const callPrice = callCost(res.usage, res.model, llm);
+      const callTokens =
+        res.usage.inputTokens +
+        res.usage.outputTokens +
+        res.usage.cacheReadTokens +
+        res.usage.cacheWriteTokens;
+      if (callTokens > 0) {
+        spent.spendCalls.push({
+          model: res.model,
+          usage: { ...res.usage },
+          costUsd: callPrice,
+          priceVersion:
+            callPrice === null
+              ? null
+              : (llm.priceVersion?.(res.model, o.installationId) ??
+                `anthropic:${PRICING_VERIFIED_AT}`),
+          spentAt,
+          billingTeams,
+        });
+      }
       if (spent.costUsd !== null) {
-        const c = callCost(res.usage, res.model, llm);
-        spent.costUsd = c === null ? null : roundUsd(spent.costUsd + c);
+        spent.costUsd = callPrice === null ? null : roundUsd(spent.costUsd + callPrice);
       }
       spent.usage = {
         inputTokens: spent.usage.inputTokens + res.usage.inputTokens,
@@ -663,6 +709,7 @@ export async function runCard(
     models: { writer: writerModel, firstPass: firstPassModel, verifier: verifierModel },
     usage: { ...spent.usage, calls: spent.calls },
     costUsd: spent.costUsd,
+    spendCalls: spent.spendCalls,
     inputs: p.stats,
   };
   o.log?.info(

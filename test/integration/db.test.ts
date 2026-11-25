@@ -43,12 +43,14 @@ async function tableNames(d: Kysely<Database>): Promise<string[]> {
 }
 
 describe("database", () => {
-  it("I-DB-1 after migration, all twenty-nine tables exist", async () => {
+  it("I-DB-1 after migration, all thirty-six tables exist", async () => {
     const names = await tableNames(db);
     for (const t of TABLE_NAMES) expect(names).toContain(t);
-    expect(TABLE_NAMES).toHaveLength(29);
+    expect(TABLE_NAMES).toHaveLength(36);
     expect(TABLE_NAMES).toContain("intent_feedback");
     expect(TABLE_NAMES).toContain("change_provenance");
+    expect(TABLE_NAMES).toContain("billing_spend_calls");
+    expect(TABLE_NAMES).toContain("billing_statement_lines");
   });
 
   it("I-DB-2 down to zero, then up again, succeeds; the pgboss schema is untouched", async () => {
@@ -97,6 +99,7 @@ describe("database", () => {
         "0016_phase1_gate",
         "0017_intent_requested",
         "0018_repository_filter",
+        "0019_team_chargeback",
       ]);
       expect(await migrateToLatest(db)).toEqual([]);
       const again = await tableNames(db);
@@ -615,6 +618,9 @@ describe("database", () => {
     const migrator = createMigrator(db);
     try {
       expect((await migrator.migrateDown()).results?.[0]?.migrationName).toBe(
+        "0019_team_chargeback",
+      );
+      expect((await migrator.migrateDown()).results?.[0]?.migrationName).toBe(
         "0018_repository_filter",
       );
       expect((await migrator.migrateDown()).results?.[0]?.migrationName).toBe(
@@ -679,6 +685,7 @@ describe("database", () => {
         "0016_phase1_gate",
         "0017_intent_requested",
         "0018_repository_filter",
+        "0019_team_chargeback",
       ]);
     }
     expect(await tableNames(db)).toContain("change_provenance");
@@ -690,6 +697,9 @@ describe("database", () => {
   it("I-DB-8 0003 down then up: down restores the 0001 intent_cards and drops intent_feedback", async () => {
     const migrator = createMigrator(db);
     try {
+      expect((await migrator.migrateDown()).results?.[0]?.migrationName).toBe(
+        "0019_team_chargeback",
+      );
       expect((await migrator.migrateDown()).results?.[0]?.migrationName).toBe(
         "0018_repository_filter",
       );
@@ -755,6 +765,7 @@ describe("database", () => {
         "0016_phase1_gate",
         "0017_intent_requested",
         "0018_repository_filter",
+        "0019_team_chargeback",
       ]);
     }
     expect(await tableNames(db)).toContain("intent_feedback");
@@ -805,6 +816,9 @@ describe("database", () => {
       );
     const migrator = createMigrator(db);
     try {
+      expect((await migrator.migrateDown()).results?.[0]?.migrationName).toBe(
+        "0019_team_chargeback",
+      );
       expect((await migrator.migrateDown()).results?.[0]?.migrationName).toBe(
         "0018_repository_filter",
       );
@@ -890,6 +904,9 @@ describe("database", () => {
     const migrator = createMigrator(db);
     try {
       expect((await migrator.migrateDown()).results?.[0]?.migrationName).toBe(
+        "0019_team_chargeback",
+      );
+      expect((await migrator.migrateDown()).results?.[0]?.migrationName).toBe(
         "0018_repository_filter",
       );
       expect((await migrator.migrateDown()).results?.[0]?.migrationName).toBe(
@@ -953,6 +970,7 @@ describe("database", () => {
         "0016_phase1_gate",
         "0017_intent_requested",
         "0018_repository_filter",
+        "0019_team_chargeback",
       ]);
     }
     expect(await policyColumns()).toEqual(upColumns);
@@ -980,6 +998,9 @@ describe("database", () => {
     for (const t of stepSix) expect(await tableNames(db), t).toContain(t);
     const migrator = createMigrator(db);
     try {
+      expect((await migrator.migrateDown()).results?.[0]?.migrationName).toBe(
+        "0019_team_chargeback",
+      );
       expect((await migrator.migrateDown()).results?.[0]?.migrationName).toBe(
         "0018_repository_filter",
       );
@@ -1028,6 +1049,7 @@ describe("database", () => {
         "0016_phase1_gate",
         "0017_intent_requested",
         "0018_repository_filter",
+        "0019_team_chargeback",
       ]);
     }
     for (const t of stepSix) expect(await tableNames(db), t).toContain(t);
@@ -1065,6 +1087,9 @@ describe("database", () => {
       .executeTakeFirstOrThrow();
     const migrator = createMigrator(db);
     try {
+      expect((await migrator.migrateDown()).results?.[0]?.migrationName).toBe(
+        "0019_team_chargeback",
+      );
       expect((await migrator.migrateDown()).results?.[0]?.migrationName).toBe(
         "0018_repository_filter",
       );
@@ -1108,6 +1133,7 @@ describe("database", () => {
         "0016_phase1_gate",
         "0017_intent_requested",
         "0018_repository_filter",
+        "0019_team_chargeback",
       ]);
     }
     const rows = await sql<{ user_id: number; verified: boolean }>`

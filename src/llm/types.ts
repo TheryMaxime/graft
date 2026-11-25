@@ -105,6 +105,8 @@ export interface LlmClient {
    * the built-in Claude price table (`src/llm/pricing.ts`); null means unpriced.
    */
   costOf?(usage: LlmUsage, model: string): number | null;
+  /** Stable identifier for the effective price entry used by `costOf`; null when unpriced. */
+  priceVersion?(model: string, installationId?: number): string | null;
 }
 
 export const ZERO_USAGE: LlmUsage = Object.freeze({

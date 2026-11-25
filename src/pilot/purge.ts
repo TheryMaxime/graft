@@ -12,7 +12,22 @@ import type { TABLE_NAMES } from "../db/schema.js";
  * `pilot_purges` records the purge itself. `service_state` holds server facts (the ceiling the
  * worker last published) and no installation data, so there is nothing of an installation in it.
  */
-export type PurgedTable = Exclude<(typeof TABLE_NAMES)[number], "pilot_purges" | "service_state">;
+export type PurgedTable = Exclude<
+  (typeof TABLE_NAMES)[number],
+  | "pilot_purges"
+  | "service_state"
+  | "billing_teams"
+  | "billing_spend_calls"
+  | "billing_spend_allocations"
+  | "billing_periods"
+  | "billing_adjustments"
+  | "billing_statement_lines"
+>;
+type PreservedTable =
+  | "billing_spend_calls"
+  | "billing_spend_allocations"
+  | "billing_adjustments"
+  | "billing_statement_lines";
 
 const repos = (i: number) => sql`(select id from repositories where installation_id = ${i})`;
 const changes = (i: number) =>
@@ -70,6 +85,23 @@ export const OWNED_ROWS: Record<PurgedTable, (installationId: number) => RawBuil
   // Phase 1 step 6: MCP token hashes and the PRs `open_change` opened, through `repositories`.
   mcp_tokens: (i) => sql`select count(*) as n from mcp_tokens where repository_id in ${repos(i)}`,
   mcp_changes: (i) => sql`select count(*) as n from mcp_changes where repository_id in ${repos(i)}`,
+  billing_team_repositories: (i) =>
+    sql`select count(*) as n from billing_team_repositories where repository_id in ${repos(i)}`,
+};
+
+export const PRESERVED_ROWS: Record<
+  PreservedTable,
+  (installationId: number) => RawBuilder<unknown>
+> = {
+  billing_spend_calls: (i) =>
+    sql`select count(*) as n from billing_spend_calls where repository_id in ${repos(i)}`,
+  billing_spend_allocations: (i) =>
+    sql`select count(*) as n from billing_spend_allocations where spend_call_id in
+      (select id from billing_spend_calls where repository_id in ${repos(i)})`,
+  billing_adjustments: (i) =>
+    sql`select count(*) as n from billing_adjustments where repository_id in ${repos(i)}`,
+  billing_statement_lines: (i) =>
+    sql`select count(*) as n from billing_statement_lines where repository_id in ${repos(i)}`,
 };
 
 export class PurgeRefused extends Error {
@@ -89,6 +121,7 @@ export interface PurgeResult {
   dryRun: boolean;
   /** Rows per table, plus `pgboss_jobs`. */
   counts: Record<string, number>;
+  preservedCounts: Record<string, number>;
   purgeId: string | null;
 }
 
@@ -128,6 +161,13 @@ export async function purgeInstallation(
       );
       counts[table] = Number(res.rows[0]?.n ?? 0);
     }
+    const preservedCounts: Record<string, number> = {};
+    for (const table of Object.keys(PRESERVED_ROWS) as PreservedTable[]) {
+      const res = await (
+        PRESERVED_ROWS[table](o.installationId) as RawBuilder<{ n: string }>
+      ).execute(tx);
+      preservedCounts[table] = Number(res.rows[0]?.n ?? 0);
+    }
     const id = String(o.installationId);
     const jobWhere = sql`data->>'installationId' = ${id} or data->'payload'->'installation'->>'id' = ${id}`;
     const hasBoss = (
@@ -144,7 +184,7 @@ export async function purgeInstallation(
       jobs = Number(res.rows[0]?.n ?? 0);
     }
     counts.pgboss_jobs = jobs;
-    if (o.dryRun) return { dryRun: true, counts, purgeId: null };
+    if (o.dryRun) return { dryRun: true, counts, preservedCounts, purgeId: null };
 
     await sql`delete from webhook_deliveries
       where installation_id = ${o.installationId}
@@ -159,10 +199,11 @@ export async function purgeInstallation(
       .values({
         installation_id: o.installationId,
         rows_deleted: JSON.stringify(counts),
+        rows_preserved: JSON.stringify(preservedCounts),
         purged_at: o.now,
       })
       .returning("id")
       .executeTakeFirstOrThrow();
-    return { dryRun: false, counts, purgeId: row.id };
+    return { dryRun: false, counts, preservedCounts, purgeId: row.id };
   });
 }

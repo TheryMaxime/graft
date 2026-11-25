@@ -342,6 +342,7 @@ describe("guard revert: schema", () => {
       "guard_events_one_revert_per_culprit",
       "guard_events_revert_open_idx",
     ]);
+    expect(await migrateDownOne(t.db)).toEqual(["0019_team_chargeback"]);
     expect(await migrateDownOne(t.db)).toEqual(["0018_repository_filter"]);
     expect(await migrateDownOne(t.db)).toEqual(["0017_intent_requested"]);
     expect(await migrateDownOne(t.db)).toEqual(["0016_phase1_gate"]);
@@ -364,10 +365,12 @@ describe("guard revert: schema", () => {
         "0016_phase1_gate",
         "0017_intent_requested",
         "0018_repository_filter",
+        "0019_team_chargeback",
       ]);
     }
     // A row with a new status blocks the rollback, which then changes nothing.
     await insertEvent({ failingSha: C(1), status: "revert_closed" });
+    expect(await migrateDownOne(t.db)).toEqual(["0019_team_chargeback"]);
     expect(await migrateDownOne(t.db)).toEqual(["0018_repository_filter"]);
     expect(await migrateDownOne(t.db)).toEqual(["0017_intent_requested"]);
     expect(await migrateDownOne(t.db)).toEqual(["0016_phase1_gate"]);
@@ -381,8 +384,10 @@ describe("guard revert: schema", () => {
       "0016_phase1_gate",
       "0017_intent_requested",
       "0018_repository_filter",
+      "0019_team_chargeback",
     ]);
     await t.db.deleteFrom("guard_events").execute();
+    expect(await migrateDownOne(t.db)).toEqual(["0019_team_chargeback"]);
     expect(await migrateDownOne(t.db)).toEqual(["0018_repository_filter"]);
     expect(await migrateDownOne(t.db)).toEqual(["0017_intent_requested"]);
     expect(await migrateDownOne(t.db)).toEqual(["0016_phase1_gate"]);
@@ -396,6 +401,7 @@ describe("guard revert: schema", () => {
       "0016_phase1_gate",
       "0017_intent_requested",
       "0018_repository_filter",
+      "0019_team_chargeback",
     ]);
     // The CHECKs: a branch name and a commit SHA of the right shape only.
     await expect(
