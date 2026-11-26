@@ -147,17 +147,8 @@ export async function saveCard(
 ): Promise<IntentCardRow> {
   return ex.transaction().execute(async (tx) => {
     const values = resultToValues(o.result);
-    // Spend is append-only and written for every run, whether or not the row below is inserted,
-    // replaced or left alone (a concurrent `ok` row wins): the budget counts what was paid for.
-    const u = o.result.usage;
-    const tokens = u.inputTokens + u.outputTokens + u.cacheWriteTokens;
-    if (tokens > 0) {
-      // cost_usd is fixed at spend time from each `response.model`; NULL = unpriced.
-      await sql`
-        insert into intent_spend (repository_id, change_id, tokens, llm_calls, spent_at, cost_usd)
-        select ch.repository_id, ch.id, ${tokens}, ${u.calls}, ${o.now}, ${o.result.costUsd ?? null}
-        from changes ch where ch.id = ${o.changeId}`.execute(tx);
-    }
+    // Per-call spend is append-only and deduplicated by the provider-response ID across the
+    // accounting handoff and this eventual card save.
     if (o.result.spendCalls?.length) {
       const change = await tx
         .selectFrom("changes as ch")
@@ -166,6 +157,23 @@ export async function saveCard(
         .where("ch.id", "=", o.changeId)
         .executeTakeFirst();
       if (!change) throw new Error("cannot store billing calls for a missing change");
+      for (const call of o.result.spendCalls) {
+        const usage = call.usage;
+        const tokens = usage.inputTokens + usage.outputTokens + usage.cacheWriteTokens;
+        await tx
+          .insertInto("intent_spend")
+          .values({
+            repository_id: Number(change.repository_id),
+            change_id: o.changeId,
+            billing_spend_call_id: call.id ?? null,
+            tokens,
+            llm_calls: 1,
+            spent_at: o.now,
+            cost_usd: call.costUsd,
+          })
+          .onConflict((oc) => oc.column("billing_spend_call_id").doNothing())
+          .execute();
+      }
       await storeBillingCalls(tx, {
         calls: o.result.spendCalls,
         repositoryId: Number(change.repository_id),
@@ -173,6 +181,15 @@ export async function saveCard(
         changeId: o.changeId,
         recordedAt: o.now,
       });
+    } else {
+      const u = o.result.usage;
+      const tokens = u.inputTokens + u.outputTokens + u.cacheWriteTokens;
+      if (tokens > 0) {
+        await sql`
+          insert into intent_spend (repository_id, change_id, tokens, llm_calls, spent_at, cost_usd)
+          select ch.repository_id, ch.id, ${tokens}, ${u.calls}, ${o.now}, ${o.result.costUsd ?? null}
+          from changes ch where ch.id = ${o.changeId}`.execute(tx);
+      }
     }
     const row = await tx
       .insertInto("intent_cards")

@@ -683,6 +683,8 @@ describe("pilot purge", () => {
       expect(res.code).toBe(0);
       expect(res.out).toContain("would delete for installation");
       for (const [table, n] of Object.entries(before)) expect(res.out).toContain(`${table}: ${n}`);
+      expect(res.out).toContain("retained billing history (indefinitely");
+      expect(res.out).toContain("billing_spend_calls: 0");
       expect(await countsFor(A.id, A.repo)).toEqual(before);
       expect(await t.db.selectFrom("pilot_purges").selectAll().execute()).toEqual([]);
       // A wrong confirmation is refused even for a dry run.

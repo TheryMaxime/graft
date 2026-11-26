@@ -399,39 +399,7 @@ export const consoleRoutes =
     app.post("/internal/console/billing/teams", async (req) => {
       const { user } = z.object({ user: userSchema }).parse(req.body);
       await verifyIdentity(user);
-      const teams = await listBillingTeams(deps.db);
-      const repositories = [
-        ...new Set(teams.flatMap((team) => team.repositories.map((r) => r.id))),
-      ];
-      const activeInstallationIds = (await installations()).map((inst) => Number(inst.id));
-      const records =
-        repositories.length && activeInstallationIds.length
-          ? await deps.db
-              .selectFrom("repositories")
-              .select(["id", "full_name", "installation_id"])
-              .where("id", "in", repositories)
-              .where("installation_id", "in", activeInstallationIds)
-              .where("removed_at", "is", null)
-              .execute()
-          : [];
-      const admins = new Map(
-        await mapBounded(
-          records,
-          5,
-          async (repo) =>
-            [
-              Number(repo.id),
-              await canAdmin(Number(repo.installation_id), repo.full_name, user),
-            ] as const,
-        ),
-      );
-      return teams.map((team) => ({
-        ...team,
-        repositories: team.repositories.map((repo) => ({
-          ...repo,
-          canAdmin: admins.get(repo.id) ?? false,
-        })),
-      }));
+      return listBillingTeams(deps.db);
     });
 
     app.post("/internal/console/billing/repositories", async (req) => {
@@ -539,11 +507,12 @@ export const consoleRoutes =
     });
 
     app.post("/internal/console/billing/adjustment", async (req) => {
-      const { user, sourcePeriod, sourceLineId, amountUsd, reason } = z
+      const { user, sourcePeriod, sourceLineId, operationId, amountUsd, reason } = z
         .object({
           user: userSchema,
           sourcePeriod: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
           sourceLineId: z.uuid(),
+          operationId: z.uuid(),
           amountUsd: z.string().regex(/^-?\d{1,12}(?:\.\d{1,2})?$/),
           reason: z.string().min(1).max(500),
         })
@@ -552,6 +521,7 @@ export const consoleRoutes =
       return createBillingAdjustment(deps.db, {
         sourcePeriod,
         sourceLineId,
+        operationId,
         amountUsd,
         reason,
         actor: user.login,

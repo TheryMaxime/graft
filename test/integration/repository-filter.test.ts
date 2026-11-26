@@ -197,12 +197,18 @@ describe("repository activation", () => {
       attached: true,
     });
     expect(attached.statusCode).toBe(200);
+    const permissionRequests = requests.filter((request) =>
+      request.endsWith("/collaborators/operator/permission"),
+    ).length;
     const teams = await call("billing/teams", { user: USER });
+    expect(
+      requests.filter((request) => request.endsWith("/collaborators/operator/permission")),
+    ).toHaveLength(permissionRequests);
     expect(teams.json()).toMatchObject([
       {
         id: teamId,
         name: "Platform",
-        repositories: [{ id: 2000001, fullName: REPO, canAdmin: true }],
+        repositories: [{ id: 2000001, fullName: REPO }],
       },
     ]);
 

@@ -7,6 +7,10 @@ import {
   getBillingStatement,
   storeBillingCalls,
 } from "../../src/modules/billing/index.js";
+import {
+  markRepositoriesRemoved,
+  upsertRepositories,
+} from "../../src/modules/installations/store.js";
 import type { SpendCall } from "../../src/modules/intent/generate.js";
 import { purgeInstallation } from "../../src/pilot/purge.js";
 import { testDb, truncateAll } from "../helpers/db.js";
@@ -165,7 +169,11 @@ describe("team chargeback ledger", () => {
     const original = await getBillingStatement(db, "2026-09");
     expect(original.closedAt).not.toBeNull();
 
-    await save(call(new Date("2026-09-20T10:00:00Z"), 0.03), new Date("2026-10-02T00:06:00Z"));
+    const lateCallId = randomUUID();
+    await save(
+      { ...call(new Date("2026-09-20T10:00:00Z"), 0.03), id: lateCallId },
+      new Date("2026-10-02T00:06:00Z"),
+    );
     expect(await getBillingStatement(db, "2026-09")).toEqual(original);
     const usageLine = original.lines.find((line) => line.lineType === "usage");
     expect(usageLine).toBeDefined();
@@ -176,6 +184,7 @@ describe("team chargeback ledger", () => {
       reason: "Provider reconciliation",
       actor: "operator",
       now: new Date("2026-10-02T00:07:00Z"),
+      operationId: randomUUID(),
     });
     expect(correction.period).toBe("2026-10");
     const later = await getBillingStatement(db, "2026-10");
@@ -186,16 +195,23 @@ describe("team chargeback ledger", () => {
       calls: 0,
       sourcePeriod: "2026-09-01",
       sourceLineId: usageLine?.id,
+      sourceCallId: null,
     });
+    expect(later.lines.find((line) => line.sourceCallId !== null)?.sourceCallId).toBe(lateCallId);
     expect(later.lines.filter((line) => line.lineType === "adjustment")).toHaveLength(4);
     await closeEligibleBillingPeriods(db, new Date("2026-11-02T00:05:00Z"));
-    expect((await getBillingStatement(db, "2026-10")).lines).toContainEqual(
+    const closedLater = await getBillingStatement(db, "2026-10");
+    expect(closedLater.lines).toContainEqual(
       expect.objectContaining({
         description: "Provider reconciliation",
         calls: 0,
         sourcePeriod: "2026-09-01",
         sourceLineId: usageLine?.id,
+        sourceCallId: null,
       }),
+    );
+    expect(closedLater.lines.find((line) => line.sourceCallId !== null)?.sourceCallId).toBe(
+      lateCallId,
     );
   });
 
@@ -215,13 +231,59 @@ describe("team chargeback ledger", () => {
       reason: "After close",
       actor: "operator",
       now: new Date("2026-10-03T00:00:00Z"),
+      operationId: randomUUID(),
     });
     expect(result.period).toBe("2026-11");
     expect((await getBillingStatement(db, "2026-11")).lines[0]).toMatchObject({
       sourcePeriod: "2026-09-01",
       sourceLineId: source.id,
+      sourceCallId: null,
       calls: 0,
     });
+  });
+
+  it("reuses the result of a correction submitted with the same operation ID", async () => {
+    await save(call(new Date("2026-09-12T10:00:00Z"), 0.05));
+    await closeEligibleBillingPeriods(db, new Date("2026-10-02T00:05:00Z"));
+    const source = (await getBillingStatement(db, "2026-09")).lines[0];
+    if (!source) throw new Error("test source line is missing");
+    const operationId = randomUUID();
+    const input = {
+      sourcePeriod: "2026-09",
+      sourceLineId: source.id,
+      amountUsd: "1.00",
+      reason: "One correction",
+      actor: "operator",
+      now: new Date("2026-10-03T00:00:00Z"),
+      operationId,
+    };
+    expect(await createBillingAdjustment(db, input)).toEqual({ period: "2026-10" });
+    expect(await createBillingAdjustment(db, input)).toEqual({ period: "2026-10" });
+    expect(
+      await db
+        .selectFrom("billing_adjustments")
+        .selectAll()
+        .where("operation_id", "=", operationId)
+        .execute(),
+    ).toHaveLength(1);
+  });
+
+  it("clears current team memberships when a repository is removed and re-added", async () => {
+    await save(call(new Date("2026-09-12T10:00:00Z"), 0.05));
+    await markRepositoriesRemoved(db, 1000001, [REPOSITORY_ID], new Date("2026-10-01T00:00:00Z"));
+    await upsertRepositories(
+      db,
+      1000001,
+      [{ id: REPOSITORY_ID, fullName: "acme/api", private: true }],
+      new Date("2026-10-02T00:00:00Z"),
+    );
+    expect(
+      await db
+        .selectFrom("billing_team_repositories")
+        .where("repository_id", "=", REPOSITORY_ID)
+        .execute(),
+    ).toEqual([]);
+    expect((await getBillingStatement(db, "2026-09")).lines).toHaveLength(3);
   });
 
   it("leaves a month open while any model call is unpriced", async () => {

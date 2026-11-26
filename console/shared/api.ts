@@ -22,7 +22,7 @@ export interface BillingTeam {
   id: string;
   name: string;
   archivedAt: string | null;
-  repositories: { id: number; fullName: string; canAdmin: boolean }[];
+  repositories: { id: number; fullName: string }[];
 }
 
 export interface BillingRepository {
@@ -55,6 +55,7 @@ export interface BillingStatementLine {
   costUsd: string | null;
   sourcePeriod: string | null;
   sourceLineId: string | null;
+  sourceCallId: string | null;
 }
 
 export interface BillingStatement {

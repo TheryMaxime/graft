@@ -295,6 +295,7 @@ export async function buildApp(deps: AppDeps): Promise<AppServer> {
           action: z.literal("adjustment"),
           sourcePeriod: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
           sourceLineId: z.uuid(),
+          operationId: z.uuid(),
           amountUsd: z.string().regex(/^-?\d{1,12}(?:\.\d{1,2})?$/),
           reason: z.string().min(1).max(500),
         }),

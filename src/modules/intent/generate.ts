@@ -9,7 +9,7 @@ import type { Config } from "../../config/index.js";
 import type { Logger } from "../../core/logger.js";
 import type { RiskClass } from "../../db/schema.js";
 import type { Price } from "../../llm/pricing.js";
-import { cost, PRICING_VERIFIED_AT, roundUsd } from "../../llm/pricing.js";
+import { cost, PRICING_VERIFIED_AT, priceFor, roundUsd } from "../../llm/pricing.js";
 import {
   type LlmClient,
   type LlmEffort,
@@ -477,9 +477,11 @@ export async function runCard(
     let model = base.model;
     let fellBack = false;
     for (let attempt = 0; attempt < 2; attempt++) {
-      const remaining = deadlineAt - o.nowMs();
+      let remaining = deadlineAt - o.nowMs();
       if (remaining < MIN_REMAINING_MS) return { ok: false, reason: "deadline_exceeded" };
       const billingTeams = (await o.captureBillingTeams?.()) ?? [];
+      remaining = deadlineAt - o.nowMs();
+      if (remaining < MIN_REMAINING_MS) return { ok: false, reason: "deadline_exceeded" };
       const spentAt = new Date(o.nowMs());
       const capabilities = llm.capabilities?.(model, o.installationId);
       const native = capabilities?.nativeSchema ?? true;
@@ -494,13 +496,20 @@ export async function runCard(
       });
       spent.calls += 1;
       const reportsUsage = capabilities?.reportsUsage ?? true;
-      const callPrice = reportsUsage ? callCost(res.usage, res.model, llm) : null;
       const callTokens =
         res.usage.inputTokens +
         res.usage.outputTokens +
         res.usage.cacheReadTokens +
         res.usage.cacheWriteTokens;
-      if (res.ok || callTokens > 0) {
+      const usageKnown = reportsUsage && callTokens > 0;
+      const callPrice = usageKnown ? callCost(res.usage, res.model, llm) : null;
+      const responseFailure =
+        !res.ok &&
+        !reportsUsage &&
+        (res.failure === "invalid_json" ||
+          res.failure === "max_tokens" ||
+          res.failure === "refusal");
+      if (res.ok || callTokens > 0 || responseFailure) {
         const spendCall: SpendCall = {
           id: randomUUID(),
           model: res.model,
@@ -511,15 +520,17 @@ export async function runCard(
               ? null
               : (llm.priceVersion?.(res.model, o.installationId) ??
                 `anthropic:${PRICING_VERIFIED_AT}`),
-          priceSnapshot: llm.priceSnapshot?.(res.model, o.installationId) ?? null,
+          priceSnapshot: llm.priceSnapshot
+            ? llm.priceSnapshot(res.model, o.installationId)
+            : priceFor(res.model),
           spentAt,
           billingTeams,
         };
         await o.persistSpendCall?.(spendCall);
         spent.spendCalls.push(spendCall);
-      }
-      if (spent.costUsd !== null) {
-        spent.costUsd = callPrice === null ? null : roundUsd(spent.costUsd + callPrice);
+        if (spent.costUsd !== null) {
+          spent.costUsd = callPrice === null ? null : roundUsd(spent.costUsd + callPrice);
+        }
       }
       spent.usage = {
         inputTokens: spent.usage.inputTokens + res.usage.inputTokens,

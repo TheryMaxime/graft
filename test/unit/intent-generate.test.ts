@@ -74,6 +74,28 @@ describe("generateCard", () => {
     expect(llm.calls).toHaveLength(1);
   });
 
+  it("U-GEN-33 rechecks the deadline after capturing billing teams", async () => {
+    let now = 1_000_000;
+    const llm = scriptedLlm({ writer: W(), verifier: agreeingVerifier });
+    const result = await runCard(prepareCardInputs(inputs(), OPTS), llm, {
+      ...genOptions({ nowMs: () => now, deadlineMs: 20_000, timeoutMs: 20_000 }),
+      captureBillingTeams: async () => {
+        now += 11_000;
+        return [];
+      },
+    });
+    expect(result.failureReason).toBe("deadline_exceeded");
+    expect(llm.calls).toHaveLength(0);
+  });
+
+  it("U-GEN-34 retains zero-token response failures as unpriced spend", async () => {
+    const llm = createFakeLlm(() => ({ failure: "invalid_json" }));
+    llm.capabilities = () => ({ ...FULL_CAPABILITIES, reportsUsage: false });
+    const result = await runCard(prepareCardInputs(inputs(), OPTS), llm, OPTS);
+    expect(result.spendCalls).toHaveLength(2);
+    expect(result.spendCalls?.every((call) => call.costUsd === null)).toBe(true);
+  });
+
   it("U-GEN-1 trivial floor: fast writer, strong agreeing verifier, 2 calls, usage summed", async () => {
     const llm = scriptedLlm({ writer: W(), verifier: agreeingVerifier });
     const r = await generateCard(inputs(), llm, OPTS);
@@ -696,7 +718,7 @@ describe("spend cost (step 6)", () => {
     expect(r.usage.calls).toBe(3);
   });
 
-  it("U-GEN-31 a call with an unknown model makes the run unpriced (null); zero-token calls cost 0", async () => {
+  it("U-GEN-31 unknown or unavailable usage makes a model call unpriced", async () => {
     const llm = scriptedLlm({
       writer: { ...W(), model: "claude-unknown-9" },
       verifier: agreeingVerifier,
@@ -709,6 +731,11 @@ describe("spend cost (step 6)", () => {
       verifier: agreeingVerifier,
     });
     expect((await generateCard(inputs(), dated, OPTS)).costUsd).toBe(0.00315);
+    const zeroUsage = scriptedLlm({
+      writer: { ...W(), usage: { inputTokens: 0, outputTokens: 0 } },
+      verifier: agreeingVerifier,
+    });
+    expect((await generateCard(inputs(), zeroUsage, OPTS)).costUsd).toBeNull();
     // No model call: nothing was spent.
     const p = prepareCardInputs(inputs(), OPTS);
     expect(unavailableResult(p, "not_configured").costUsd).toBe(0);

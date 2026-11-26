@@ -264,6 +264,7 @@ export interface IntentSpendTable {
   id: Generated<string>;
   repository_id: number;
   change_id: string | null;
+  billing_spend_call_id: string | null;
   tokens: number;
   llm_calls: Optional<number>;
   spent_at: Date;
@@ -321,6 +322,7 @@ export interface BillingPeriodTable {
 
 export interface BillingAdjustmentsTable {
   id: Generated<string>;
+  operation_id: string | null;
   period_start: ColumnType<string, string | Date, string | Date>;
   team_id: string | null;
   team_name: string;

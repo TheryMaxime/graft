@@ -66,6 +66,7 @@ export function Billing() {
   const [renameValue, setRenameValue] = useState("");
   const [editingLine, setEditingLine] = useState<string | null>(null);
   const [adjustment, setAdjustment] = useState({ amountUsd: "", reason: "" });
+  const [adjustmentOperationId, setAdjustmentOperationId] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -110,11 +111,14 @@ export function Billing() {
 
   async function saveAdjustment(ev: SubmitEvent, line: BillingStatementLine) {
     ev.preventDefault();
+    const operationId = adjustmentOperationId ?? crypto.randomUUID();
+    setAdjustmentOperationId(operationId);
     const result = await change(
       {
         action: "adjustment",
         sourcePeriod: month,
         sourceLineId: line.id,
+        operationId,
         amountUsd: adjustment.amountUsd,
         reason: adjustment.reason,
       },
@@ -125,6 +129,7 @@ export function Billing() {
     setMonth(period);
     setAdjustment({ amountUsd: "", reason: "" });
     setEditingLine(null);
+    setAdjustmentOperationId(null);
   }
 
   const exportStatement = statementForMonth(statement.data, month);
@@ -257,7 +262,7 @@ export function Billing() {
                       {team.repositories.map((repo) => (
                         <li key={repo.id}>
                           <span>{repo.fullName}</span>
-                          {!team.archivedAt && repo.canAdmin ? (
+                          {!team.archivedAt ? (
                             <button
                               class="btn btn--ghost"
                               type="button"
@@ -276,8 +281,6 @@ export function Billing() {
                             >
                               Detach
                             </button>
-                          ) : !team.archivedAt ? (
-                            <span class="billing__permission">Repository admin required</span>
                           ) : null}
                         </li>
                       ))}
@@ -468,12 +471,13 @@ export function Billing() {
                                   required
                                   pattern="-?[0-9]{1,12}(\.[0-9]{1,2})?"
                                   value={adjustment.amountUsd}
-                                  onInput={(ev) =>
+                                  onInput={(ev) => {
+                                    setAdjustmentOperationId(null);
                                     setAdjustment({
                                       ...adjustment,
                                       amountUsd: ev.currentTarget.value,
-                                    })
-                                  }
+                                    });
+                                  }}
                                 />
                                 <label class="sr" for={`adjust-reason-${line.id}`}>
                                   Reason
@@ -484,9 +488,13 @@ export function Billing() {
                                   maxLength={500}
                                   required
                                   value={adjustment.reason}
-                                  onInput={(ev) =>
-                                    setAdjustment({ ...adjustment, reason: ev.currentTarget.value })
-                                  }
+                                  onInput={(ev) => {
+                                    setAdjustmentOperationId(null);
+                                    setAdjustment({
+                                      ...adjustment,
+                                      reason: ev.currentTarget.value,
+                                    });
+                                  }}
                                 />
                                 <button
                                   class="btn btn--primary"
@@ -498,7 +506,10 @@ export function Billing() {
                                 <button
                                   class="btn btn--ghost"
                                   type="button"
-                                  onClick={() => setEditingLine(null)}
+                                  onClick={() => {
+                                    setEditingLine(null);
+                                    setAdjustmentOperationId(null);
+                                  }}
                                 >
                                   Cancel
                                 </button>
@@ -507,7 +518,10 @@ export function Billing() {
                               <button
                                 class="btn btn--ghost"
                                 type="button"
-                                onClick={() => setEditingLine(line.id)}
+                                onClick={() => {
+                                  setAdjustmentOperationId(null);
+                                  setEditingLine(line.id);
+                                }}
                               >
                                 Adjust
                               </button>

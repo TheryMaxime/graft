@@ -25,6 +25,7 @@ export function exportCsv(statement: BillingStatement): string {
     "costUsd",
     "sourcePeriod",
     "sourceLineId",
+    "sourceCallId",
   ];
   return [
     fields.join(","),
@@ -43,6 +44,7 @@ export function exportCsv(statement: BillingStatement): string {
               "description",
               "sourcePeriod",
               "sourceLineId",
+              "sourceCallId",
             ].includes(field),
           ),
         )

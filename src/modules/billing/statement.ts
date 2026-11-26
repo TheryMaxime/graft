@@ -48,6 +48,7 @@ export interface BillingStatementLine {
   costUsd: string | null;
   sourcePeriod: string | null;
   sourceLineId: string | null;
+  sourceCallId: string | null;
 }
 
 export interface BillingStatement {
@@ -75,6 +76,7 @@ type RawLine = {
   cost_usd: string | null;
   source_period: string | null;
   source_line_id: string | null;
+  source_call_id: string | null;
 };
 
 function line(row: RawLine): BillingStatementLine {
@@ -96,71 +98,80 @@ function line(row: RawLine): BillingStatementLine {
     costUsd: row.cost_usd,
     sourcePeriod: row.source_period,
     sourceLineId: row.source_line_id,
+    sourceCallId: row.source_call_id,
   };
 }
 
 export async function getBillingStatement(db: Db, month: string): Promise<BillingStatement> {
   const start = periodDate(month);
   const startDate = `${month}-01`;
-  const closed = await db
-    .selectFrom("billing_periods")
-    .select(["closed_at", "closed_by"])
-    .where("period_start", "=", `${month}-01`)
-    .executeTakeFirst();
-  if (closed) {
-    const saved = await sql<RawLine>`
-      select l.id::text, l.team_id::text, l.team_name, l.repository_id::text,
-             l.repository_name, l.model, l.line_type, l.description, l.calls::text,
-             l.unpriced_calls::text, l.input_tokens::text, l.output_tokens::text,
-             l.cache_read_tokens::text, l.cache_write_tokens::text, l.cost_usd::text,
-             a.source_period::text, a.source_statement_line_id::text as source_line_id
-        from billing_statement_lines l
-        left join billing_adjustments a on a.id = l.adjustment_id
-       where l.period_start = ${startDate}
-       order by l.team_name, l.repository_name, l.model, l.line_type, l.id`.execute(db);
-    return {
-      month,
-      closedAt: closed.closed_at.toISOString(),
-      closedBy: closed.closed_by,
-      lines: saved.rows.map(line),
-    };
-  }
+  return db
+    .transaction()
+    .setIsolationLevel("repeatable read")
+    .execute(async (tx) => {
+      const closed = await tx
+        .selectFrom("billing_periods")
+        .select(["closed_at", "closed_by"])
+        .where("period_start", "=", `${month}-01`)
+        .executeTakeFirst();
+      if (closed) {
+        const saved = await sql<RawLine>`
+          select l.id::text, l.team_id::text, l.team_name, l.repository_id::text,
+                 l.repository_name, l.model, l.line_type, l.description, l.calls::text,
+                 l.unpriced_calls::text, l.input_tokens::text, l.output_tokens::text,
+                 l.cache_read_tokens::text, l.cache_write_tokens::text, l.cost_usd::text,
+                 a.source_period::text, a.source_statement_line_id::text as source_line_id,
+                 a.source_call_id::text as source_call_id
+            from billing_statement_lines l
+            left join billing_adjustments a on a.id = l.adjustment_id
+           where l.period_start = ${startDate}
+           order by l.team_name, l.repository_name, l.model, l.line_type, l.id`.execute(tx);
+        return {
+          month,
+          closedAt: closed.closed_at.toISOString(),
+          closedBy: closed.closed_by,
+          lines: saved.rows.map(line),
+        };
+      }
 
-  const end = nextMonth(start);
-  const spend = await sql<RawLine>`
-    select md5(concat_ws(':', coalesce(a.team_id::text, 'unattributed'), a.team_name,
-                         c.repository_id, c.repository_name, c.model)) as id,
-           a.team_id::text, a.team_name, c.repository_id::text, c.repository_name, c.model,
-           'usage'::text as line_type, null::text as description,
-           count(*)::text as calls,
-           count(*) filter (where c.cost_usd is null)::text as unpriced_calls,
-           sum(a.input_tokens)::text as input_tokens, sum(a.output_tokens)::text as output_tokens,
-           sum(a.cache_read_tokens)::text as cache_read_tokens,
-           sum(a.cache_write_tokens)::text as cache_write_tokens,
-           sum(a.cost_usd)::text as cost_usd,
-           null::text as source_period, null::text as source_line_id
-      from billing_spend_allocations a
-      join billing_spend_calls c on c.id = a.spend_call_id
-     where c.spent_at >= ${start} and c.spent_at < ${end}
-     group by a.team_id, a.team_name, c.repository_id, c.repository_name, c.model
-     order by a.team_name, c.repository_name, c.model`.execute(db);
-  const adjustments = await sql<RawLine>`
-    select id::text, team_id::text, team_name, repository_id::text, repository_name, model,
-           'adjustment'::text as line_type, reason as description,
-           case when source_call_id is null then 0 else 1 end::text as calls,
-           (cost_usd is null)::int::text as unpriced_calls,
-           input_tokens::text, output_tokens::text, cache_read_tokens::text,
-           cache_write_tokens::text, cost_usd::text,
-           source_period::text, source_statement_line_id::text as source_line_id
-      from billing_adjustments
-     where period_start = ${startDate}
-     order by team_name, repository_name, id`.execute(db);
-  return {
-    month,
-    closedAt: null,
-    closedBy: null,
-    lines: [...spend.rows.map(line), ...adjustments.rows.map(line)],
-  };
+      const end = nextMonth(start);
+      const spend = await sql<RawLine>`
+        select md5(concat_ws(':', coalesce(a.team_id::text, 'unattributed'), a.team_name,
+                             c.repository_id, c.repository_name, c.model)) as id,
+               a.team_id::text, a.team_name, c.repository_id::text, c.repository_name, c.model,
+               'usage'::text as line_type, null::text as description,
+               count(*)::text as calls,
+               count(*) filter (where c.cost_usd is null)::text as unpriced_calls,
+               sum(a.input_tokens)::text as input_tokens, sum(a.output_tokens)::text as output_tokens,
+               sum(a.cache_read_tokens)::text as cache_read_tokens,
+               sum(a.cache_write_tokens)::text as cache_write_tokens,
+               sum(a.cost_usd)::text as cost_usd,
+               null::text as source_period, null::text as source_line_id,
+               null::text as source_call_id
+          from billing_spend_allocations a
+          join billing_spend_calls c on c.id = a.spend_call_id
+         where c.spent_at >= ${start} and c.spent_at < ${end}
+         group by a.team_id, a.team_name, c.repository_id, c.repository_name, c.model
+         order by a.team_name, c.repository_name, c.model`.execute(tx);
+      const adjustments = await sql<RawLine>`
+        select id::text, team_id::text, team_name, repository_id::text, repository_name, model,
+               'adjustment'::text as line_type, reason as description,
+               case when source_call_id is null then 0 else 1 end::text as calls,
+               (cost_usd is null)::int::text as unpriced_calls,
+               input_tokens::text, output_tokens::text, cache_read_tokens::text,
+               cache_write_tokens::text, cost_usd::text,
+               source_period::text, source_statement_line_id::text as source_line_id,
+               source_call_id::text as source_call_id
+          from billing_adjustments
+         where period_start = ${startDate}
+         order by team_name, repository_name, id`.execute(tx);
+      return {
+        month,
+        closedAt: null,
+        closedBy: null,
+        lines: [...spend.rows.map(line), ...adjustments.rows.map(line)],
+      };
+    });
 }
 
 async function closePeriod(
@@ -266,6 +277,7 @@ export async function createBillingAdjustment(
     reason: string;
     actor: string;
     now: Date;
+    operationId: string;
   },
 ): Promise<{ period: string }> {
   const sourceStartDate = period(o.sourcePeriod);
@@ -281,6 +293,12 @@ export async function createBillingAdjustment(
   }
   const next = nextMonth(periodDate(o.sourcePeriod));
   return db.transaction().execute(async (tx) => {
+    const prior = await tx
+      .selectFrom("billing_adjustments")
+      .select("period_start")
+      .where("operation_id", "=", o.operationId)
+      .executeTakeFirst();
+    if (prior) return { period: String(prior.period_start).slice(0, 7) };
     const source = await tx
       .selectFrom("billing_statement_lines")
       .selectAll()
@@ -304,9 +322,10 @@ export async function createBillingAdjustment(
       target = nextMonth(target);
       if (i === 119) throw new BillingStatementError(409, "No open billing month is available.");
     }
-    await tx
+    const inserted = await tx
       .insertInto("billing_adjustments")
       .values({
+        operation_id: o.operationId,
         period_start: `${monthOf(target)}-01`,
         team_id: source.team_id,
         team_name: source.team_name,
@@ -325,7 +344,17 @@ export async function createBillingAdjustment(
         created_by: o.actor,
         created_at: o.now,
       })
+      .onConflict((oc) => oc.column("operation_id").doNothing())
+      .returning("id")
       .execute();
+    if (!inserted.length) {
+      const retry = await tx
+        .selectFrom("billing_adjustments")
+        .select("period_start")
+        .where("operation_id", "=", o.operationId)
+        .executeTakeFirstOrThrow();
+      return { period: String(retry.period_start).slice(0, 7) };
+    }
     return { period: monthOf(target) };
   });
 }

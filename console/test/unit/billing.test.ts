@@ -26,6 +26,7 @@ const line = (overrides: Partial<BillingStatementLine> = {}): BillingStatementLi
   costUsd: "0.15",
   sourcePeriod: null,
   sourceLineId: null,
+  sourceCallId: null,
   ...overrides,
 });
 
@@ -49,6 +50,7 @@ describe("billing view helpers", () => {
         line({
           sourcePeriod: "2026-09-01",
           sourceLineId: "source-line",
+          sourceCallId: "source-call",
           costUsd: "-1.00",
         }),
       ],
@@ -56,6 +58,7 @@ describe("billing view helpers", () => {
     expect(csv.split("\r\n")[0]).toContain("id,teamId,teamName,repositoryId");
     expect(csv).toContain('"line-1","team-1","Platform","42"');
     expect(csv).toContain('"2026-09-01","source-line"');
+    expect(csv).toContain('"source-call"');
     expect(csv).toContain('"-1.00"');
   });
 
