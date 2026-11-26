@@ -35,6 +35,8 @@ export function anthropicCredential(c: {
 }
 
 const CLAUDE_API = "https://api.anthropic.com";
+/** The API version sent to gateways and clouds, which need not accept the SDK's newer default. */
+const GATEWAY_API_VERSION = "2023-06-01";
 
 export interface AnthropicSettings {
   maxRetries: number;
@@ -97,6 +99,11 @@ function classify(err: unknown): LlmFailure {
 }
 
 export function createAnthropicLlm(o: AnthropicLlmOptions): LlmClient {
+  const defaultHeaders = {
+    // The SDK would send the key as a bearer token; gateways read it from `x-api-key`.
+    ...(o.apiKey === undefined ? {} : { "x-api-key": o.apiKey, authorization: null }),
+    ...(isClaudeApi(o.baseURL) ? {} : { "anthropic-version": GATEWAY_API_VERSION }),
+  };
   const client = new Anthropic({
     apiKey: o.apiKey ?? null,
     authToken: o.authToken ?? null,
@@ -112,6 +119,10 @@ export function createAnthropicLlm(o: AnthropicLlmOptions): LlmClient {
         }
       : {}),
     maxRetries: o.maxRetries,
+    defaultHeaders,
+    // `tracedLlm` makes the one span per call. Setting the option also keeps the SDK from reading
+    // the variables that could put prompts and answers on spans of its own.
+    openTelemetry: { traces: false, propagation: false },
     ...(o.fetch ? { fetch: o.fetch } : {}),
   });
   const serverRefusalFallback = (model: string) => o.refusalFallback && FALLBACK_MODEL.test(model);

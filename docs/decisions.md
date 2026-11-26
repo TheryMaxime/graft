@@ -1053,3 +1053,12 @@ Production audit (14 to 26 October 2026, 66 PRs with a written card, read throug
 - **Evaluation.** The should-flag metric counts a card as flagged when the verifier disagrees or lists missing changes, since both now alert the reviewer. syn-022 moves from `disagree` to `agree` with an unchanged final class.
 - **Versioning.** `PROMPT_VERSION` is `intent-v5`; U-PROMPT-1 and the synthetic baseline are updated. Not done: a live eval run. Judge it on production data: the disagreement rate per `prompt_version` and the 👍/👎 votes.
 - **Tests.** U-GEN-6, U-IREN-1, U-IREN-12, U-PROMPT-1.
+
+## `@anthropic-ai/sdk` 1.x
+
+The 1.x client changes what goes on the wire. Graft keeps its own behaviour (`src/llm/anthropic.ts`).
+
+- **API key header.** The SDK now sends a key as `Authorization: Bearer`. Graft still sends `x-api-key`, as the configuration documents and gateways expect. A bearer token and federation are unchanged.
+- **API version.** The Claude API gets the SDK's `anthropic-version: 2026-10-21`; its breaking changes touch nothing Graft sends. Any other base URL keeps `2023-06-01`: the newer version was not tested against a gateway or cloud.
+- **Tracing.** The SDK now makes spans, and `ANTHROPIC_OPEN_TELEMETRY_*` can put prompts and answers on them. Graft turns them and the SDK's trace propagation off: `tracedLlm` already makes one span per call, without content (U-LLM-21).
+- **Beta calls.** The URL no longer carries `?beta=true`; the `anthropic-beta` header is unchanged (U-LLM-2).
