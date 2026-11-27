@@ -2,6 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Writable } from "node:stream";
+import { trace } from "@opentelemetry/api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createLogger, type Logger } from "../../src/core/logger.js";
 import { agreeingVerifier, createFakeLlm, forbiddenLlm, scriptedLlm } from "../../src/llm/fake.js";
@@ -162,8 +163,7 @@ describe("anthropic client", () => {
     await client(sonnet.fn, { refusalFallback: true }).complete(
       req({ model: "claude-sonnet-5-5" }),
     );
-    expect(sonnet.seen[0]?.url).toContain("/v1/messages");
-    expect(sonnet.seen[0]?.url).toContain("beta=true");
+    expect(sonnet.seen[0]?.url).toBe("https://api.anthropic.test/v1/messages");
     expect(sonnet.seen[0]?.body.fallbacks).toBe("default");
     expect(sonnet.seen[0]?.headers.get("anthropic-beta")).toContain(
       "server-side-fallback-2026-07-01",
@@ -177,7 +177,7 @@ describe("anthropic client", () => {
     const haiku = fakeFetch([ok()]);
     await client(haiku.fn, { refusalFallback: true }).complete(req({ model: "claude-haiku-5-5" }));
     expect(haiku.seen[0]?.body).not.toHaveProperty("fallbacks");
-    expect(haiku.seen[0]?.url).not.toContain("beta=true");
+    expect(haiku.seen[0]?.headers.has("anthropic-beta")).toBe(false);
 
     const off = fakeFetch([ok()]);
     await client(off.fn, { refusalFallback: false }).complete(req({ model: "claude-sonnet-5-5" }));
@@ -414,6 +414,7 @@ describe("gateways and bearer tokens", () => {
     expect(f.seen[0]?.headers.get("authorization")).toBe("Bearer or-token-value");
     expect(f.seen[0]?.headers.has("x-api-key")).toBe(false);
     expect(f.seen[0]?.body.model).toBe("anthropic/claude-haiku-5.5");
+    expect(f.seen[0]?.headers.get("anthropic-version")).toBe("2023-06-01");
 
     // An API key alone sends only x-api-key, to the Claude API when no base URL is given.
     const g = fakeFetch([ok()]);
@@ -427,6 +428,29 @@ describe("gateways and bearer tokens", () => {
     expect(g.seen[0]?.url).toBe("https://api.anthropic.com/v1/messages");
     expect(g.seen[0]?.headers.get("x-api-key")).toBe("sk-ant-config");
     expect(g.seen[0]?.headers.has("authorization")).toBe(false);
+    expect(g.seen[0]?.headers.get("anthropic-version")).toBe("2026-10-21");
+
+    // A gateway that takes an API key gets the same header.
+    const h = fakeFetch([ok()]);
+    await client(h.fn).complete(req());
+    expect(h.seen[0]?.headers.get("x-api-key")).toBe("sk-ant-test-key");
+    expect(h.seen[0]?.headers.has("authorization")).toBe(false);
+    expect(h.seen[0]?.headers.get("anthropic-version")).toBe("2023-06-01");
+  });
+
+  it("U-LLM-21 the SDK makes no spans of its own, whatever the process env says", async () => {
+    vi.stubEnv("ANTHROPIC_OPEN_TELEMETRY", "true");
+    vi.stubEnv("ANTHROPIC_OPEN_TELEMETRY_TRACES_CONTENT_MODE", "content");
+    const getTracerProvider = vi.spyOn(trace, "getTracerProvider");
+    const getTracer = vi.spyOn(trace, "getTracer");
+    try {
+      expect(await client(fakeFetch([ok()]).fn).complete(req())).toMatchObject({ ok: true });
+      expect(getTracerProvider).not.toHaveBeenCalled();
+      expect(getTracer).not.toHaveBeenCalled();
+    } finally {
+      getTracerProvider.mockRestore();
+      getTracer.mockRestore();
+    }
   });
 
   it("U-LLM-14 the server-side refusal fallback is only offered on the Claude API", () => {
